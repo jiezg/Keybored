@@ -1,0 +1,253 @@
+//emojiFx 按键喷图动画效果模块
+//在独立线程中运行动画窗口和渲染循环，与钩子线程彻底解耦
+//使用 thread.table 共享表进行跨线程通信
+//保留 win.ui.layered 做窗口初始化，覆盖 redraw 使用缓存渲染资源
+import win.ui;
+import thread.table;
+
+namespace emojiFx;
+
+//动画线程句柄
+var animThreadHandle = null;
+
+//跨线程通信共享表
+var emitQueue = null;
+var controlTable = null;
+
+//图形颜色池（ARGB格式，可扩充）
+var colorPool = {
+	0xFFFF6B6B, 0xFFFF8E8E, 0xFFFF4757, 0xFFE84393,
+	0xFFFD79A8, 0xFFFFA502, 0xFFFFBE76, 0xFFFFEAA7,
+	0xFF7BED9F, 0xFF2ED573, 0xFF1E90FF, 0xFF70A1FF,
+	0xFF5352ED, 0xFFA29BFE, 0xFFDFE6E9, 0xFFFFF200
+};
+
+var MAX_PARTICLES = 30;
+var EMITS_PER_TICK = 2;
+
+//初始化动画模块（启动独立动画线程）
+init = function(ownerForm){
+	if(animThreadHandle) return;
+
+	//创建跨线程通信共享表
+	emitQueue = ..thread.table("{B8E2F1A3-EMOJI-FX01-QUEUE}");
+	controlTable = ..thread.table("{B8E2F1A3-EMOJI-FX01-CTRL}");
+	controlTable.dispose = false;
+
+	//启动动画线程，传递共享表和常量作为参数（子线程无法访问外部闭包上值）
+	animThreadHandle = ..thread.create(
+		function(emitQueue, controlTable, colorPool, maxParticles, emitsPerTick){
+			//在子线程中需要重新import所有依赖
+			import win.ui;
+			import win.ui.layered;
+			import gdip.solidBrush;
+			import gdip.bitmap;
+			import gdip.graphics;
+			import gdi;
+			import shapeData;
+
+			//获取屏幕尺寸
+			var screenW, screenH = win.getScreen();
+
+			//创建全屏透明分层窗口
+			var fxForm = win.form(
+				right = screenW;
+				bottom = screenH;
+				border = "none";
+				title = "";
+				topmost = true;
+				transparent = true;
+			);
+			fxForm.modifyStyleEx(0, 0x20/*_WS_EX_TRANSPARENT*/);
+			fxForm.modifyStyleEx(0, 0x80/*_WS_EX_TOOLWINDOW*/);
+			fxForm.modifyStyleEx(0x40000/*_WS_EX_APPWINDOW*/, 0);
+
+			//用 win.ui.layered 初始化分层窗口（设置透明、背景等）
+			var layeredWnd = win.ui.layered(fxForm, -1);
+
+			//构建矢量图形路径（必须在同一线程）
+			var shapePaths = shapeData.buildAll();
+
+			//缓存画刷
+			var cachedBrush = gdip.solidBrush(0xFFFFFFFF);
+
+			//粒子数据
+			var particles = {};
+
+			//===== 缓存渲染资源，覆盖 redraw 避免每帧创建销毁DC/位图 =====
+			var hwnd = fxForm.hwnd;
+			var hdc = ::GetDC(hwnd);
+			var hMemDc = ::CreateCompatibleDC(hdc);
+			//创建全屏DIBSection位图
+			var hMemBmp = ::Gdi32.CreateDIBSectionP(hMemDc, {
+				INT cbSize = 40;
+				int cx = screenW;
+				int cy = -screenH;
+				WORD planes = 1;
+				WORD bitCount = 32;
+				INT compression;
+				INT size;
+				int xpm;
+				int ypm;
+				INT clrUsed;
+				INT clrImportant;
+			}, 0, {ptr v}, null, 0);
+			var hOldBmp = ::SelectObject(hMemDc, hMemBmp);
+			//创建缓存的GDI+ Graphics对象（绑定到hMemDc）
+			var cachedGraphics = gdip.graphics(hMemDc);
+			cachedGraphics.smoothingMode = 2/*_SmoothingModeHighQuality*/;
+
+			//覆盖 redraw：使用缓存资源，只做绘图+UpdateLayeredWindow
+			layeredWnd.redraw = function(){
+				//清空画布（全透明）
+				cachedGraphics.clear(0x00000000);
+
+				//绘制所有粒子
+				for(i=1;#particles;1){
+					var p = particles[i];
+					var alpha = 255;
+					if(p.progress > 0.6){
+						alpha = math.floor(255 * (1 - (p.progress - 0.6) / 0.4));
+					}
+					if(alpha <= 0) continue;
+
+					cachedBrush.color = (alpha << 24) | (p.color & 0xFFFFFF);
+
+					cachedGraphics.saveTransform();
+					cachedGraphics.translate(p.x, p.y);
+					cachedGraphics.rotate(p.rotation);
+					cachedGraphics.scale(p.scale, p.scale);
+					p.shape.fill(cachedGraphics, cachedBrush);
+					cachedGraphics.restoreTransform();
+				}
+
+				//使用aardio封装的updateLayeredWindow（正确处理默认参数）
+				gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+			}
+
+			fxForm.show(true);
+			layeredWnd.redraw();
+
+			//排除任务栏预览
+			::DwmApi := raw.loadDll("Dwmapi.dll");
+			var excludeFromPeek = { INT value = 1 };
+			::DwmApi.DwmSetWindowAttribute(hwnd, 12/*_DWMWA_EXCLUDED_FROM_PEEK*/, excludeFromPeek, 4);
+
+			//动画帧更新函数
+			var timerId = null;
+			timerId = fxForm.setInterval(function(){
+				//检查退出标志
+				if(controlTable.dispose){
+					fxForm.clearInterval(timerId);
+					timerId = null;
+					//清理渲染资源
+					cachedGraphics.delete();
+					::SelectObject(hMemDc, hOldBmp);
+					::DeleteObject(hMemBmp);
+					::DeleteDC(hMemDc);
+					::ReleaseDC(hwnd, hdc);
+					if(cachedBrush) cachedBrush.delete();
+					for(i=1;#shapePaths;1){
+						shapePaths[i].delete();
+					}
+					fxForm.close();
+					win.quitMessage();
+					return;
+				}
+
+				//从共享队列读取emit数据并创建粒子
+				var emitCount = math.min(emitQueue.len(), emitsPerTick);
+				for(q=1;emitCount;1){
+					emitQueue.pop(1); //消费队列项
+					if(#particles >= maxParticles){
+						table.remove(particles, 1);
+					}
+
+					var shape = shapePaths[math.random(1, #shapePaths)];
+					var color = colorPool[math.random(1, #colorPool)];
+					var startX = screenW - math.random(50, 200);
+					var startY = screenH - math.random(20, 60);
+
+					table.push(particles, {
+						shape = shape;
+						color = color;
+						x = startX; y = startY;
+						startX = startX; startY = startY;
+						driftX = math.random(-100, 100);
+						riseHeight = math.random(300, 500);
+						rotation = math.random(-30, 30);
+						rotationSpeed = math.random(-3, 3);
+						scale = 0.6 + math.random() * 0.8;
+						progress = 0;
+						speed = 0.008 + math.random() * 0.006;
+					});
+				}
+
+				//清空剩余队列（防止积累）
+				while(emitQueue.len() > 0){
+					emitQueue.pop(1);
+				}
+
+				if(#particles == 0) return;
+
+				//更新粒子状态
+				var i = 1;
+				while(i <= #particles){
+					var p = particles[i];
+					p.progress += p.speed;
+					if(p.progress >= 1){
+						table.remove(particles, i);
+						continue;
+					}
+					var t = p.progress;
+					var ease = 1 - (1 - t) * (1 - t) * (1 - t);
+					p.x = p.startX + p.driftX * ease;
+					p.y = p.startY - p.riseHeight * ease;
+					p.rotation = p.rotation + p.rotationSpeed;
+					i++;
+				}
+
+				layeredWnd.redraw();
+			}, 40); //40ms≈25fps，降低CPU占用
+
+			//运行动画线程消息循环（阻塞，直到fxForm关闭）
+			win.loopMessage();
+
+			//消息循环退出后清理（兜底，正常退出已在定时器中清理）
+			if(cachedGraphics){
+				cachedGraphics.delete();
+			}
+		}, emitQueue, controlTable, colorPool, MAX_PARTICLES, EMITS_PER_TICK
+	);
+}
+
+//触发喷图（跨线程共享表，钩子回调零开销）
+emit = function(vkcode){
+	if(!emitQueue) return;
+	emitQueue.push(vkcode);
+}
+
+//清理资源（通知动画线程退出）
+dispose = function(){
+	if(!controlTable) return;
+	controlTable.dispose = true;
+	//等待动画线程退出（最多1秒）
+	if(animThreadHandle){
+		..thread.waitOne(animThreadHandle, 1000);
+		..raw.closeHandle(animThreadHandle);
+		animThreadHandle = null;
+	}
+	//释放共享表
+	if(emitQueue){
+		emitQueue.release();
+		emitQueue = null;
+	}
+	controlTable.release();
+	controlTable = null;
+}
+
+/**intellisense()
+emojiFx.init(.(ownerForm) = 初始化动画模块，在独立线程中运行
+emojiFx.emit(.(vkcode) = 触发喷图效果（跨线程共享表，钩子回调零开销）
+emojiFx.dispose() = 清理资源（通知动画线程退出）
+end intellisense**/

@@ -1,0 +1,381 @@
+import win.ui;
+//import console;
+import win.ui.menu;
+import win.ui.ctrl.vlist
+import thread.command;
+/*DSG{{*/
+mainForm = win.form(text="Keybored - 键盘防抖";right=400;bottom=550;max=false)
+mainForm.add(
+edit={cls="edit";left=6;top=515;right=86;bottom=538;db=1;dl=1;edge=1;z=1};
+static={cls="static";text="ms  连击阈值";left=95;top=515;right=186;bottom=538;center=1;db=1;dl=1;transparent=1;z=2};
+staticCount={cls="static";text="按键次数: 0";left=258;top=515;right=396;bottom=538;align="center";center=1;db=1;dr=1;transparent=1;z=4};
+tab={cls="tab";left=6;top=8;right=396;bottom=507;db=1;dl=1;dr=1;dt=1;edge=1;z=3}
+)
+/*}}*/
+
+_MAX_Long_unsigned_int = 0xffffffff;//GetMessageTime()满值
+//添加tab页并初始化
+var frmTabStatistics = mainForm.tab.add( text=" 统计" );
+frmTabStatistics.add( 
+	listview={cls="vlistview"};//虚表
+) 
+frmTabStatistics.listview.insertColumn("键名",80);
+frmTabStatistics.listview.insertColumn("键码",80);
+frmTabStatistics.listview.insertColumn("抖动次数",80);
+frmTabStatistics.listview.insertColumn("连击间隔(ms)",100);
+//frmTabStatistics.listview.insertColumn("上一次",0);
+
+var tabKeysStatistics = {/*fields={"键名","键码","抖动次数","上一次","连击间隔"}*/};
+var tabKeysStatisticsCol = {[1]="键名",[2]="键码",[3]="抖动次数",[4]="连击间隔"};//列名
+//frmTabStatistics.listview.createTableAdapter(tabKeysStatistics,{"键名","键码","抖动次数","连击间隔","上一次"});
+frmTabStatistics.listview.onGetDispItem = lambda(item,row,col){text=tabKeysStatistics[row][tabKeysStatisticsCol[col]]}; 
+
+//添加tab页并初始化
+var frmTabLog = mainForm.tab.add( text=" 日志" );
+frmTabLog.add( 
+	listview={cls="vlistview"};//虚表，实验版本再给一次机会
+) 
+frmTabLog.listview.insertColumn("操作",50);
+frmTabLog.listview.insertColumn("键码",50);
+frmTabLog.listview.insertColumn("键名",100);
+frmTabLog.listview.insertColumn("时标",100);
+//frmTabLog.listview.insertColumn("类型码",0);
+
+var tabKeysLog = {/*fields={"类型码","操作","键码","键名","时标"}*/};
+var tabKeysLogAct = {[1]="按下",[2]="弹起",[3]="长按*",[4]="屏蔽"};//类型码
+var tabKeysLogCol = {[1]="操作",[2]="键码",[3]="键名",[4]="时标"};//列名
+var MAX_LOG_COUNT = 10000;//日志上限
+//frmTabLog.listview.createTableAdapter(tabKeysLog,{"操作","键码","键名","时标"});
+frmTabLog.listview.onGetDispItem = lambda(item,row,col){text=tabKeysLog[row][tabKeysLogCol[col]]}; 
+
+//UI刷新节流：标记脏数据，由定时器批量刷新，避免每次按键都刷新UI阻塞钩子
+var uiDirty = false;
+win.setInterval(function(){
+	if(!uiDirty) return;
+	uiDirty = false;
+	mainForm.staticCount.text = "日志条目: " + tostring(#tabKeysLog);
+	frmTabLog.listview.count = #tabKeysLog;
+	frmTabLog.listview.ensureVisible(frmTabLog.listview.count);
+	frmTabStatistics.listview.count = #tabKeysStatistics;
+},200);//每200ms批量刷新一次UI
+
+//多线程操作主界面
+var listener = thread.command();
+listener.$log = function(kAct,vkcode,timeStamp){
+	var keyAct = kAct;
+	var keyCode = vkcode;
+	var keyName = key.getName(vkcode);
+	var keyTimestamp = timeStamp;
+	table.push(tabKeysLog,{"类型码"=keyAct,"操作"=tabKeysLogAct[keyAct],"键码"=keyCode,"键名"=keyName,"时标"=keyTimestamp});
+	//日志上限控制，超出时移除最早的记录
+	if(#tabKeysLog > MAX_LOG_COUNT){
+		table.remove(tabKeysLog, 1, 1000);
+	}
+			
+	if(keyAct == 4){//记录屏蔽
+		var keyLastTime = 0;
+		for(j=#tabKeysLog-1;1;-1){//向前找上一次按下或屏
+			if(tabKeysLog[j]["键码"] == keyCode && (tabKeysLog[j]["类型码"] == 1 || tabKeysLog[j]["类型码"] == 4)){
+				keyLastTime = tabKeysLog[j]["时标"];
+				break;
+			}
+		}
+		var timeDelta = (keyTimestamp<keyLastTime) ? (_MAX_Long_unsigned_int-keyLastTime+keyTimestamp) : (keyTimestamp-keyLastTime); //KBDLLHOOKSTRUCT.time超长整型最大值归零
+		var flagFound = 0;
+		for k,v in tabKeysStatistics  { 
+     		if(v["键码"] == keyCode){
+     			if(v["抖动次数"]>0){
+     			    v["连击间隔"] = math.floor(((v["连击间隔"]*v["抖动次数"])+timeDelta)/(v["抖动次数"]+1));
+     			}
+     			v["抖动次数"] += 1;
+     			v["上一次"] = keyTimestamp;
+     			flagFound = 1;
+     			break;
+     		}
+ 		};
+ 		if(!flagFound){
+ 			table.push(tabKeysStatistics,{"键名"=keyName,"键码"=keyCode,"抖动次数"=1,"上一次"=keyTimestamp,"连击间隔"=math.floor(timeDelta)}) 
+ 		}
+ 		needSortStatistics = true;//标记需要排序，由定时器统一处理
+	}
+	else if(keyAct == 1){//记录按下
+		for k,v in tabKeysStatistics  { 
+     		if(v["键码"] == keyCode){
+     			v["上一次"] = keyTimestamp;
+     			break;
+     		}
+ 		};
+	}
+	uiDirty = true;//标记UI需要刷新，由定时器批量处理
+}
+
+var intChattering = 100;//抖动阈值
+mainForm.edit.text = tostring(intChattering);
+mainForm.edit.onChange = function(){ 
+	if(owner.onModified)owner.onModified(true);
+	var intNew = tonumber(mainForm.edit.text)//
+	if(!intNew || intNew > 2000 || intNew < 0){
+		mainForm.edit.showWarningTip("","请输入1~2000的整数");
+		mainForm.edit.text = tostring(intChattering);
+	}
+	else {
+		intChattering = intNew;
+	}
+}
+//自绘
+frmTabLog.listview.onnotify = function(id,code,ptr){ 
+	if( code == 0xFFFFFFF4/*_NM_CUSTOMDRAW*/ ){
+		var lvcd = frmTabLog.listview.getNotifyCustomDraw(code,ptr);
+		if( lvcd.nmcd.dwDrawStage == 0x10001/*_CDDS_ITEMPREPAINT*/)
+			return 0x20/*_CDRF_NOTIFYSUBITEMDRAW*/
+		elseif( lvcd.nmcd.dwDrawStage == 1/*_CDDS_PREPAINT*/ ){
+			return 0x20/*_CDRF_NOTIFYITEMDRAW*/;
+		}
+		elseif( lvcd.nmcd.dwDrawStage == ( 0x10001/*_CDDS_ITEMPREPAINT*/ | 0x20000/*_CDDS_SUBITEM*/) ){ 
+			//注意这里 iSubItem 的索引自0开始( 其他函数通常自1开始 )
+			if(frmTabLog.listview.getItemText(lvcd.nmcd.dwItemSpec+1, 1/*lvcd.iSubItem+1*/)=="屏蔽"){
+				lvcd.clrText = gdi.RGB(255,0,0);
+				//lvcd.clrTextBk = lvcd.iSubItem % 2 ? gdi.RGB(0,12,223) : gdi.RGB(128,23,0);
+				lvcd.update();
+			}
+			elseif(frmTabLog.listview.getItemText(lvcd.nmcd.dwItemSpec+1, 1/*lvcd.iSubItem+1*/)=="长按*"){
+				lvcd.clrText = gdi.RGB(0,0,255);
+				lvcd.update();
+			}			
+			return 0/*_CDRF_DODEFAULT*/
+		}
+	}
+}
+
+//统计表低频排序定时器
+var needSortStatistics = false;
+win.setInterval(function(){
+	if(needSortStatistics){
+		table.sort(tabKeysStatistics,function(v){
+			return owner["抖动次数"] > v["抖动次数"];
+		});
+		frmTabStatistics.listview.count = #tabKeysStatistics;
+		needSortStatistics = false;
+	}
+},2000);//每2秒排序一次
+
+
+import key.hook;
+import emojiFx;
+var hook = key.hook();
+var tabKeysLastTime = {};//keycode为键
+var tabKeysDown = {};//跟踪每个键是否处于按下状态（用于长按检测）
+
+//缓存前台窗口句柄，减少钩子回调中的跨进程调用
+var cachedForeground = 0;
+win.setInterval(function(){
+	cachedForeground = win.getForeground();
+},500);
+
+//钩子健康检测与自动恢复机制（参考 key.hotkey 实现）
+hook.$hookHealth = true;
+hook.healthCheckInterval = 30 * 1000;//30秒检查一次
+
+hook.setHealthCheckTimer = function(enabled){
+	if(hook.$healthCheckTimer){
+		win.clearInterval(hook.$healthCheckTimer);
+		hook.$healthCheckTimer = null;
+	}
+	if(!enabled) return;
+	
+	hook.$healthCheckTimer = win.setInterval(
+		function(){
+			if(hook.$hookHealth){
+				hook.$hookHealth = null;//重置标记，等待下次按键确认
+			}
+			else{
+				if(win.getIdleTime() < hook.healthCheckInterval){
+					//系统非空闲但钩子未收到消息，发送测试按键探测
+					::User32.keybd_event(0xFF/*_VK_NONE*/,0,2/*_KEYEVENTF_KEYUP*/ | 8, 0);
+					for(i=1;10;1){
+						thread.delay(20);
+						if(hook.$hookHealth) return;
+					}
+					//钩子已失效，重新安装
+					hook.reinstall();
+				}
+				else{
+					hook.$hookHealth = true;//系统空闲，正常
+				}
+			}
+		},hook.healthCheckInterval
+	);
+}
+
+hook.reinstall = function(){
+	//先停止旧的健康检测定时器
+	if(hook.$healthCheckTimer){
+		win.clearInterval(hook.$healthCheckTimer);
+		hook.$healthCheckTimer = null;
+	}
+	//保存当前回调函数
+	var proc = hook.proc;
+	hook.close();
+	//创建新钩子对象并恢复自定义属性
+	var newHook = key.hook();
+	newHook.proc = proc;
+	newHook.$hookHealth = true;
+	newHook.healthCheckInterval = hook.healthCheckInterval;
+	newHook.setHealthCheckTimer = hook.setHealthCheckTimer;
+	newHook.reinstall = hook.reinstall;
+	newHook.$healthCheckTimer = null;
+	//替换hook引用（闭包通过upvalue引用，赋值后所有闭包可见新对象）
+	hook = newHook;
+	hook.setHealthCheckTimer(true);
+}
+
+hook.setHealthCheckTimer(true);
+
+function validateKeyChattering(vkcode,timeStamp,isRepeat){//同步方式，返回(是否抖动,是否长按)
+	if(isRepeat){//长按重复KEYDOWN，跳过抖动检测
+		return false, true; 
+	}
+	if(!tabKeysLastTime[vkcode]){//首次
+		tabKeysLastTime[vkcode] = timeStamp;//更新
+		return false, false; 
+	}
+	var lastTime = tabKeysLastTime[vkcode]; 
+	tabKeysLastTime[vkcode] = timeStamp;//更新
+	
+	var timeDelta = (timeStamp<lastTime) ? (_MAX_Long_unsigned_int-lastTime+timeStamp) : (timeStamp-lastTime); //KBDLLHOOKSTRUCT.time超长整型最大值归零
+	if(timeDelta < intChattering){//chattering detected
+		return true, false; 
+	}
+
+	return false, false; 
+}
+
+function logForHook(kAct,vkcode,timeStamp){//异步方式，直接使用 thread.command 跨线程调用
+	listener.$log(kAct,vkcode,timeStamp);
+}
+
+//录制回调函数
+hook.proc = function(msg,vkcode,scancode,injected,flags,timeStamp,extraInfo){ 
+	hook.$hookHealth = true;//标记钩子存活
+	
+	if( injected ) {
+		//识别健康检测的测试按键
+		if(vkcode == 0xFF) {
+			hook.$hookHealth = true;
+			return true;
+		}
+		return; //模拟按键不处理
+	}
+     if( cachedForeground == mainForm.hwnd && win.getFocus() != mainForm.edit.hwnd) return true;   
+    	
+    select(msg) {
+    	case 0x100/*_WM_KEYDOWN*/ ,0x104/*_WM_SYSKEYDOWN*/ {
+    	    var isRepeat = tabKeysDown[vkcode];//是否长按重复
+    	    tabKeysDown[vkcode] = true;//标记按下
+    	    
+    	    var isChattering, isLongPress = validateKeyChattering(vkcode,timeStamp,isRepeat);
+    	    
+    	    if(isLongPress){//长按重复，不屏蔽但记录
+    	    	logForHook(3/*长按*/,vkcode,timeStamp);
+    	    	emojiFx.emit(vkcode);//长按也喷图
+    	    	return;//不屏蔽，继续传递按键
+    	    }
+    	    
+    	    if(isChattering){//抖动，屏蔽
+    	    	logForHook(4/*屏蔽*/,vkcode,timeStamp);
+    	    	return true; 
+    	    }
+    	    logForHook(1/*按下*/,vkcode,timeStamp);
+    	    emojiFx.emit(vkcode);//正常按下喷图
+    	}
+    	case 0x101/*_WM_KEYUP*/,0x105/*_WM_SYSKEYUP*/ {
+    	    tabKeysDown[vkcode] = false;//清除按下状态
+    	    logForHook(2/*弹起*/,vkcode,timeStamp);
+    	} 
+    }     
+} 
+
+//托盘图标与响应
+import win.util.tray;
+mainForm.tray = win.util.tray(mainForm);
+ mainForm.onMinimize = function(lParam){
+	mainForm.tray.tip = "Keybored";
+	mainForm.show(false); //隐藏窗口
+	mainForm.tray.pop("Keybored在这里",,,1000);
+	return true;//阻击默认消息传递
+}
+mainForm.onClose = function(hwnd,message,wParam,lParam){
+	mainForm.tray.tip = "Keybored";
+	mainForm.show(false); //隐藏窗口
+	mainForm.tray.pop("Keybored在这里",,,1000);
+	return false;//阻击默认关闭消息传递
+}
+mainForm.onTrayMessage = {
+	[0x205/*_WM_RBUTTONUP*/  ] = function(wParam){ 
+	    //弹出托盘菜单以前,一定要前置主窗口中,避免不点击菜单不会消失，父窗口隐藏也要这样做
+	    win.setForeground(mainForm.hwnd)
+	     
+		/*
+		下面创建托盘弹出菜单。
+		如果程序要开机启动到托盘，最好在这里创建菜单，在用户点击前不要创建菜单，
+		避免系统启动时 DPI 缩放前创建的菜单字体偏小（出现这情况的机率很小）。
+		如果不想重复创建菜单最好写到一个库里，然后在这里 import 即可避免上述问题。
+		*/
+		
+		mainForm.popmenu = win.ui.popmenu(mainForm);//创建弹出菜单
+		mainForm.popmenu.add('&界面',function(id){ mainForm.show(true);	});
+		mainForm.popmenu.add();//分隔线
+		mainForm.popmenu.add('&关闭',function(id){
+			mainForm.onClose = null;//卸载函数
+			mainForm.close();
+		});	
+	    		
+	    mainForm.popmenu.popup();
+	    mainForm.popmenu.close();
+	};
+	[0x202/*_WM_LBUTTONUP*/] = function(wParam){ 
+		
+	};
+	[0x203/*_WM_LBUTTONDBLCLK*/] = function(wParam){ 
+		mainForm.show(true);
+	};
+	[0x404/*_PARAM_DESTROY*/] = function(wParam){ 
+		
+	};
+	[0x405/*_PARAM_CLICKED*/] = function(wParam){ 
+		
+	};
+}
+/**details(限制)
+低级键盘钩子回调函数不要做耗时操作，
+如果耗时超过一秒或超过注册表限制的更小时间，系统会直接删除钩子。
+没有任何方法可以检查到删除操作，应当遵守规则避免滥用。
+
+耗时操作建议在钩子回调中创建线程，或使用 winform.setTimeout 延时异步执行。
+在超级热键回调函数中，如果返回一个函数也可以不阻塞异步执行。
+
+如果仍然出现过一段时间键盘钩子失效。
+建议检查一下是否安装了什么特别的软件导致了这样的问题。
+
+一般不使用这种方法实现快捷键、热键功能,
+创建快捷键、热键参考:aardio范例->Windows窗口应用->快捷键
+end details**/ 
+
+emojiFx.init(mainForm);
+mainForm.show();
+win.loopMessage();
+hook.setHealthCheckTimer(false);//停止健康检测定时器
+hook.close();
+emojiFx.dispose();//清理动画资源
+
+/**TODO:
+√长按检测，避开抖动（长按重复KEYDOWN标记为"长按*"，不屏蔽）;
+√异步优化，钩子采用单独表记录上次时间，界面使用日志表回溯上次时间，跨线程传值;
+√日志总数上限控制;
+自适应、单独设置防抖间隔时间调整;
+√钩子结构体获得的时间(单位ms)到达长整型(unsigned long)上限后溢出归零，从上次开机计算约49天一次，目前已考虑两次按键之间刚好翻转一次的情况;
+√钩子健康检测与自动恢复机制（参考 key.hotkey 实现）;
+√移除 logForHook 中多余的 thread.invoke，直接使用 thread.command 异步调用;
+√统计表排序改为低频定时，减少主线程开销;
+√缓存前台窗口句柄，减少钩子回调中的跨进程调用;
+**/

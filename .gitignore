@@ -1,0 +1,11 @@
+# aardio 构建临时文件
+.build/
+
+# IDE 工作文件
+.trae/
+
+# 构建产物（通过 GitHub Release 分发）
+dist/
+
+# 运行时配置目录
+config/
