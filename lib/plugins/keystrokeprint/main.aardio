@@ -1,0 +1,347 @@
+//keystrokeprint 键纹分析插件入口
+//订阅按键事件，自维护样本库
+//由 plugin.loadAll() 通过 loadcodex 加载
+import plugin;
+import fsys;
+import web.json;
+
+//获取加载上下文
+var ctx = plugin.getCurrentContext();
+var pluginId = ctx.pluginId;
+var ownerForm = ctx.ownerForm;
+
+//===== 自维护样本库 =====
+var BUFFER_SIZE = 2000;
+var collectBuffer = {};
+var collectWritePos = 0;
+var isCollecting = false;
+var collectSessionId = null;
+
+var sampleDir = io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\samples\");
+
+//键位分类映射（隐私脱敏）
+var keyCategoryMap = {
+	[0x41]=1;[0x42]=1;[0x43]=1;[0x44]=1;[0x45]=1;[0x46]=1;[0x47]=1;
+	[0x48]=1;[0x49]=1;[0x4A]=1;[0x4B]=1;[0x4C]=1;[0x4D]=1;[0x4E]=1;
+	[0x4F]=1;[0x50]=1;[0x51]=1;[0x52]=1;[0x53]=1;[0x54]=1;[0x55]=1;
+	[0x56]=1;[0x57]=1;[0x58]=1;[0x59]=1;[0x5A]=1;
+	[0x30]=2;[0x31]=2;[0x32]=2;[0x33]=2;[0x34]=2;
+	[0x35]=2;[0x36]=2;[0x37]=2;[0x38]=2;[0x39]=2;
+	[0x20]=3;[0x0D]=4;[0x08]=5;[0x09]=6;
+	[0xA0]=7;[0xA1]=8;[0x11]=9;[0x12]=10;
+	[0x70]=11;[0x71]=11;[0x72]=11;[0x73]=11;[0x74]=11;
+	[0x75]=11;[0x76]=11;[0x77]=11;[0x78]=11;[0x79]=11;
+	[0x7A]=11;[0x7B]=11;
+	[0x25]=12;[0x26]=12;[0x27]=12;[0x28]=12;
+};
+
+//订阅按键事件（移到start中，确保注册后才订阅）
+var onKeyDown = function(data){
+	if(!isCollecting) return;
+	var cat = keyCategoryMap[data.vkcode] || 0;
+	var item = { type=1; cat=cat; ts=data.timestamp; };
+	if(#collectBuffer < BUFFER_SIZE){
+		table.push(collectBuffer, item);
+	}
+	else{
+		collectWritePos = (collectWritePos % BUFFER_SIZE) + 1;
+		collectBuffer[collectWritePos] = item;
+	}
+};
+var onKeyUp = function(data){
+	if(!isCollecting) return;
+	var cat = keyCategoryMap[data.vkcode] || 0;
+	var item = { type=2; cat=cat; ts=data.timestamp; };
+	if(#collectBuffer < BUFFER_SIZE){
+		table.push(collectBuffer, item);
+	}
+	else{
+		collectWritePos = (collectWritePos % BUFFER_SIZE) + 1;
+		collectBuffer[collectWritePos] = item;
+	}
+};
+
+//===== Python进程管理 =====
+var pythonExe = null;
+
+findPython = function(){
+	if(pythonExe) return pythonExe;
+	var candidates = {"python"; "python3"};
+	for(i=1;#candidates;1){
+		var prcs = io.popen(candidates[i] + " --version");
+		var output = prcs.read(-1);
+		prcs.close();
+		if(output && string.find(output, "Python 3")){
+			pythonExe = candidates[i];
+			return pythonExe;
+		}
+	}
+	return null;
+}
+
+getPythonDir = function(){
+	return io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\");
+}
+
+getModelDir = function(userId){
+	var dir = io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\model\" + userId + "\");
+	fsys.createDir(dir);
+	return dir;
+}
+
+getSampleDir = function(){
+	return sampleDir;
+}
+
+getInferResultPath = function(){
+	return io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\infer_result.json");
+}
+
+flushBuffer = function(){
+	if(#collectBuffer == 0) return null;
+	var filePath = sampleDir + "session_" + tostring(collectSessionId) + ".json";
+	var output = { session_id=collectSessionId; event_count=#collectBuffer; events={} };
+	for(i=1;#collectBuffer;1){
+		table.push(output.events, { type=collectBuffer[i].type; cat=collectBuffer[i].cat; ts=collectBuffer[i].ts });
+	}
+	var jsonText = web.json.stringify(output, true);
+	string.save(filePath, jsonText);
+	return filePath;
+}
+
+clearBuffer = function(){
+	collectBuffer = {};
+	collectWritePos = 0;
+}
+
+//===== 设置对话框 =====
+var settingsForm = null;
+
+//===== 插件实例 =====
+var instance = {};
+var running = false;
+
+instance.start = function(){
+	running = true;
+	//启动时订阅事件（必须在注册之后调用subscribe才有效）
+	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, onKeyDown);
+	plugin.subscribe(pluginId, plugin.events.KEY_UP, onKeyUp);
+	plugin.reportStatus(pluginId, "运行中");
+};
+
+instance.stop = function(){
+	running = false;
+	if(isCollecting){
+		isCollecting = false;
+	}
+	//停止时取消所有订阅
+	plugin.unsubscribeAll(pluginId);
+	plugin.reportStatus(pluginId, "已停止");
+};
+
+instance.dispose = function(){
+	running = false;
+	isCollecting = false;
+	collectBuffer = {};
+};
+
+instance.showSettings = function(parentForm){
+	//弹出键纹分析设置对话框
+	var dlg = win.form(text="键纹分析 设置";right=400;bottom=540;parent=parentForm;border="dialog window");
+	dlg.add(
+		tabSettings={cls="tab";left=10;top=10;right=390;bottom=490;edge=1};
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=495;right=200;bottom=515;checked=plugin.getAutoStart(pluginId)};
+	);
+
+	//训练tab
+	var tabTrain = dlg.tabSettings.add(text="训练");
+	tabTrain.add(
+		editUserId={cls="edit";text="user1";left=90;top=25;right=220;bottom=45;edge=1};
+		staticUserId={cls="static";text="用户名:";left=20;top=25;right=85;bottom=45;transparent=1};
+		btnStartTrain={cls="button";text="开始训练";left=240;top=20;right=340;bottom=48};
+		btnStopTrain={cls="button";text="停止训练";left=240;top=55;right=340;bottom=83;disabled=1};
+		staticSampleCount={cls="static";text="已采集: 0 事件";left=20;top=55;right=220;bottom=75;transparent=1};
+		staticTrainStatus={cls="static";text="状态: 就绪";left=20;top=85;right=360;bottom=105;transparent=1};
+		progressTrain={cls="progress";left=20;top=110;right=360;bottom=130;min=0;max=100;pos=0};
+		staticTrainTip={cls="static";text="训练说明: 点击开始训练后正常打字，建议采集500+按键后停止。";left=20;top=140;right=360;bottom=220;multiline=1;transparent=1};
+	);
+
+	//识别tab
+	var tabInfer = dlg.tabSettings.add(text="识别");
+	tabInfer.add(
+		btnLoadModel={cls="button";text="加载模型";left=20;top=25;right=120;bottom=53};
+		btnStartInfer={cls="button";text="开始识别";left=130;top=25;right=230;bottom=53;disabled=1};
+		btnStopInfer={cls="button";text="停止识别";left=240;top=25;right=340;bottom=53;disabled=1};
+		staticModelInfo={cls="static";text="模型: 未加载";left=20;top=65;right=360;bottom=85;transparent=1};
+		progressSimilarity={cls="progress";left=20;top=95;right=360;bottom=115;min=0;max=100;pos=0};
+		staticSimilarity={cls="static";text="相似度: --";left=20;top=125;right=180;bottom=145;transparent=1};
+		staticConfidence={cls="static";text="置信度: --";left=200;top=125;right=360;bottom=145;transparent=1};
+		staticInferStatus={cls="static";text="状态: 就绪";left=20;top=155;right=360;bottom=175;transparent=1};
+		staticInferTip={cls="static";text="识别说明: 加载模型后点击开始识别，系统会实时分析打字者相似度。";left=20;top=185;right=360;bottom=250;multiline=1;transparent=1};
+	);
+
+	var loadedModelUserId = null;
+	var inferTimerId = null;
+
+	//训练事件
+	tabTrain.btnStartTrain.oncommand = function(id, event){
+		var userId = tabTrain.editUserId.text;
+		if(!userId || #string.trim(userId) == 0){
+			tabTrain.staticTrainStatus.text = "状态: 请输入用户名";
+			return;
+		}
+		if(!findPython()){
+			tabTrain.staticTrainStatus.text = "状态: 未找到Python，请安装Python 3.10+";
+			return;
+		}
+		isCollecting = true;
+		collectBuffer = {};
+		collectWritePos = 0;
+		collectSessionId = time.tick();
+		fsys.createDir(sampleDir);
+		tabTrain.btnStartTrain.disabled = true;
+		tabTrain.btnStopTrain.disabled = false;
+		tabTrain.staticTrainStatus.text = "状态: 采集中...";
+
+		tabTrain.setInterval(function(){
+			if(!isCollecting) return;
+			tabTrain.staticSampleCount.text = "已采集: " + tostring(#collectBuffer) + " 事件";
+			tabTrain.progressTrain.pos = math.min(100, math.floor(#collectBuffer / 5));
+		}, 500);
+	};
+
+	tabTrain.btnStopTrain.oncommand = function(id, event){
+		isCollecting = false;
+		tabTrain.btnStartTrain.disabled = false;
+		tabTrain.btnStopTrain.disabled = true;
+
+		if(#collectBuffer < 50){
+			tabTrain.staticTrainStatus.text = "状态: 样本不足（至少50事件）";
+			return;
+		}
+
+		var samplePath = flushBuffer();
+		clearBuffer();
+
+		if(!samplePath){
+			tabTrain.staticTrainStatus.text = "状态: flush失败";
+			return;
+		}
+
+		tabTrain.staticTrainStatus.text = "状态: 训练中...";
+		tabTrain.progressTrain.pos = 0;
+
+		var userId = tabTrain.editUserId.text;
+		var pythonDir = getPythonDir();
+		var modelDir = getModelDir(userId);
+		var sDir = getSampleDir();
+
+		var trainCmd = pythonExe + ' "' + pythonDir + 'train.py"'
+			+ ' --input "' + sDir + '"'
+			+ ' --output "' + modelDir + '"'
+			+ ' --user-id "' + userId + '"';
+
+		thread.create(
+			function(cmd, modelDir, dlgHwnd){
+				import win;
+				import io;
+				var prcs = io.popen(cmd);
+				prcs.read(-1);
+				prcs.close();
+				var success = io.exist(modelDir + "meta.json");
+				win.postInvoke(dlgHwnd, function(){
+					if(success){
+						tabTrain.staticTrainStatus.text = "状态: 训练完成!";
+						tabTrain.progressTrain.pos = 100;
+					}
+					else{
+						tabTrain.staticTrainStatus.text = "状态: 训练失败";
+						tabTrain.progressTrain.pos = 0;
+					}
+				});
+			}, trainCmd, modelDir, dlg.hwnd
+		);
+	};
+
+	//识别事件
+	tabInfer.btnLoadModel.oncommand = function(id, event){
+		var userId = tabTrain.editUserId.text;
+		var modelDir = getModelDir(userId);
+		var metaPath = modelDir + "meta.json";
+		if(!io.exist(metaPath)){
+			tabInfer.staticModelInfo.text = "模型: 未找到，请先训练";
+			return;
+		}
+		var metaText = string.load(metaPath);
+		var meta = web.json.parse(metaText);
+		loadedModelUserId = userId;
+		tabInfer.staticModelInfo.text = "模型: " + userId + " (" + meta.modelType + ")";
+		tabInfer.btnStartInfer.disabled = false;
+	};
+
+	tabInfer.btnStartInfer.oncommand = function(id, event){
+		if(!loadedModelUserId) return;
+		if(!findPython()){
+			tabInfer.staticInferStatus.text = "状态: 未找到Python";
+			return;
+		}
+		isCollecting = true;
+		collectBuffer = {};
+		collectWritePos = 0;
+		collectSessionId = time.tick();
+		tabInfer.btnStartInfer.disabled = true;
+		tabInfer.btnStopInfer.disabled = false;
+		tabInfer.staticInferStatus.text = "状态: 识别中...";
+
+		inferTimerId = tabInfer.setInterval(function(){
+			if(#collectBuffer < 30) return;
+			var samplePath = flushBuffer();
+			clearBuffer();
+			if(!samplePath) return;
+
+			var modelDir = getModelDir(loadedModelUserId);
+			var pythonDir = getPythonDir();
+			var resultPath = getInferResultPath();
+
+			var inferCmd = pythonExe + ' "' + pythonDir + 'infer.py"'
+				+ ' --model "' + modelDir + '"'
+				+ ' --input "' + samplePath + '"'
+				+ ' --output "' + resultPath + '"';
+
+			var prcs = io.popen(inferCmd);
+			prcs.read(-1);
+			prcs.close();
+
+			if(io.exist(resultPath)){
+				var resultText = string.load(resultPath);
+				var result = web.json.parse(resultText);
+				var similarity = result.similarity || 0;
+				var confidence = result.confidence || "low";
+				tabInfer.progressSimilarity.pos = math.floor(similarity * 100);
+				tabInfer.staticSimilarity.text = "相似度: " + tostring(math.floor(similarity * 100)) + "%";
+				tabInfer.staticConfidence.text = "置信度: " + confidence;
+			}
+		}, 2000);
+	};
+
+	tabInfer.btnStopInfer.oncommand = function(id, event){
+		isCollecting = false;
+		clearBuffer();
+		if(inferTimerId){
+			tabInfer.clearInterval(inferTimerId);
+			inferTimerId = null;
+		}
+		tabInfer.btnStartInfer.disabled = false;
+		tabInfer.btnStopInfer.disabled = true;
+		tabInfer.staticInferStatus.text = "状态: 已停止";
+	};
+
+	dlg.onClose = function(){
+		plugin.setAutoStart(pluginId, dlg.chkAutoStart.checked);
+	};
+
+	dlg.doModal();
+};
+
+//返回实例表
+return instance;

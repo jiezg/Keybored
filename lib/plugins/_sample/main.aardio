@@ -1,0 +1,175 @@
+//_sample 示范插件
+//复制此目录并重命名为你的插件ID，修改 plugin.json 和本文件即可
+//由 plugin.loadAll() 通过 loadcodex 加载，本文件必须 return instance 表
+
+import plugin;
+import win.ui;
+
+/*
+=== 插件开发指南 ===
+
+1. 目录结构：
+   plugins/你的插件ID/
+     plugin.json    ← 插件描述文件（必须）
+     main.aardio    ← 插件入口（必须，文件名与 plugin.json 中 entry 一致）
+     其他文件...     ← 插件私有资源（可选）
+
+2. plugin.json 字段说明：
+   id          - 插件唯一标识（字符串，与目录名一致）
+   name        - 插件显示名称
+   version     - 版本号
+   description - 插件描述
+   entry       - 入口文件名（通常为 "main.aardio"）
+   hasSettings - 是否有设置页（布尔值，为 true 时列表操作列显示⚙图标）
+   autoStart   - 是否随主程序自动启动（布尔值，默认 true）
+
+   plugin.json 模板（复制后修改）：
+   {
+       "autoStart": false,
+       "description": "插件描述",
+       "entry": "main.aardio",
+       "hasSettings": true,
+       "id": "你的插件ID",
+       "name": "插件名称",
+       "version": "1.0.0"
+   }
+
+3. 入口文件要求：
+   - 必须在文件末尾 return instance 表
+   - instance 表可包含以下接口（均为可选，但建议全部实现）：
+     start()                  - 启动插件
+     stop()                   - 停止插件
+     dispose()                - 清理资源（程序退出时调用）
+     showSettings(parentForm) - 显示设置对话框（hasSettings为true时必须实现）
+
+4. plugin 模块提供的 API：
+   plugin.getCurrentContext()              - 获取加载上下文 {pluginId, ownerForm}
+   plugin.getPluginDir()                   - 获取插件目录路径
+   plugin.subscribe(id, event, callback)   - 订阅事件
+   plugin.unsubscribeAll(id)               - 取消所有订阅
+   plugin.reportStatus(id, status)         - 报告运行状态（如"运行中"/"已停止"）
+   plugin.getAutoStart(id)                 - 获取自动启动设置
+   plugin.setAutoStart(id, enabled)        - 设置自动启动
+   plugin.saveConfig(id, configTable)      - 保存配置到 plugin.json
+
+5. 事件类型（plugin.events）：
+   KEY_DOWN   = 1  按键按下
+   KEY_UP     = 2  按键弹起
+   LONG_PRESS = 3  长按
+   BLOCKED    = 4  抖动屏蔽
+
+6. 事件回调参数 data：
+   data.vkcode    - 虚拟键码（数字）
+   data.timestamp - 时间戳（毫秒）
+
+7. 注意事项：
+   - subscribe 必须在 start 中调用（注册之后才有效）
+   - stop 中必须调用 unsubscribeAll 防止回调泄漏
+   - 如需创建子线程，子线程内需重新 import 所有依赖
+   - 子线程无法访问外部闭包变量，需通过 thread.create 参数传递
+   - 函数引用无法跨线程序列化，传递文件路径字符串代替
+   - 插件可能用到的库需在主程序 main.aardio 中以注释 import 预声明（//import xxx）
+*/
+
+//===== 获取加载上下文（每个插件必须调用）=====
+var ctx = plugin.getCurrentContext();
+var pluginId = ctx.pluginId;       //插件ID，来自 plugin.json 的 id 字段
+var ownerForm = ctx.ownerForm;     //主程序窗口，可作为对话框的 parent
+
+//获取插件目录路径（用于加载同目录下的其他资源文件）
+var pluginDir = plugin.getPluginDir();
+
+//插件运行状态
+var running = false;
+
+//===== 插件实例表（必须 return）=====
+var instance = {};
+
+//start - 启动插件
+//由主程序在插件列表点击"启动"或自动启动时调用
+//在此处：订阅事件、初始化资源、启动线程等
+instance.start = function(){
+	if(running) return; //防止重复启动
+	running = true;
+
+	//订阅事件（必须在 start 中调用，注册时 subscribe 无效）
+	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, function(data){
+		if(!running) return;
+		//data.vkcode - 虚拟键码
+		//data.timestamp - 时间戳
+		//TODO: 处理按键按下事件
+	});
+
+	plugin.subscribe(pluginId, plugin.events.KEY_UP, function(data){
+		if(!running) return;
+		//TODO: 处理按键弹起事件
+	});
+
+	plugin.subscribe(pluginId, plugin.events.LONG_PRESS, function(data){
+		if(!running) return;
+		//TODO: 处理长按事件
+	});
+
+	plugin.subscribe(pluginId, plugin.events.BLOCKED, function(data){
+		if(!running) return;
+		//TODO: 处理抖动屏蔽事件
+	});
+
+	//报告运行状态（如不调用，主程序会默认标记"运行中"）
+	plugin.reportStatus(pluginId, "运行中");
+};
+
+//stop - 停止插件
+//由主程序在插件列表点击"停止"时调用
+//在此处：取消订阅、停止线程、释放资源等
+instance.stop = function(){
+	if(!running) return;
+	running = false;
+
+	//必须取消所有订阅，防止回调泄漏
+	plugin.unsubscribeAll(pluginId);
+
+	//TODO: 停止线程、释放资源
+
+	plugin.reportStatus(pluginId, "已停止");
+};
+
+//dispose - 清理资源
+//由主程序退出时调用（disposeAll 中调用）
+//与 stop 的区别：dispose 是最终清理，不需要取消订阅和报告状态
+instance.dispose = function(){
+	running = false;
+	//TODO: 释放所有资源
+};
+
+//showSettings - 显示设置对话框
+//由主程序在插件列表点击"设置"时调用
+//仅当 plugin.json 中 hasSettings 为 true 时才会被调用
+//parentForm 是主程序窗口，用作对话框的父窗口
+instance.showSettings = function(parentForm){
+	var settingsForm = win.form(
+		text="示范插件 设置";
+		right=300;
+		bottom=150;
+		parent=parentForm;
+		border="dialog window"
+	);
+	settingsForm.add(
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=10;right=200;bottom=30;checked=plugin.getAutoStart(pluginId)};
+		btnOk={cls="button";text="确定";left=60;top=60;right=150;bottom=90};
+		btnCancel={cls="button";text="取消";left=170;top=60;right=260;bottom=90};
+	);
+	settingsForm.btnOk.oncommand = function(id, event){
+		//保存自动启动设置到 plugin.json
+		plugin.setAutoStart(pluginId, settingsForm.chkAutoStart.checked);
+		//TODO: 保存其他设置
+		settingsForm.close();
+	};
+	settingsForm.btnCancel.oncommand = function(id, event){
+		settingsForm.close();
+	};
+	settingsForm.doModal();
+};
+
+//必须 return instance 表（loadcodex 的返回值会被 plugin.register 保存）
+return instance;

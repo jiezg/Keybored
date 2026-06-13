@@ -7,5 +7,14 @@
 # 构建产物（通过 GitHub Release 分发）
 dist/
 
+# 发布后的外部插件目录（仅根目录）
+/plugins/
+
+# 发布残留
+*.exe
+
 # 运行时配置目录
 config/
+
+# IDE 配置
+.gh-config/

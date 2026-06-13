@@ -1,12 +1,11 @@
 //shapeData 矢量图形数据模块
 //由SVG path数据自动转换生成，所有图形归一化到40x40像素，中心(0,0)
+//由插件入口 main.aardio 通过 loadcodex 加载，返回 { buildAll = buildAll }
 import gdip.path;
-
-namespace shapeData;
 
 //heart
 build1 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-14.03,4.44,-18.01,11.3,-17.88,15.58,-13.59);
 		path.addBezier(15.58,-13.59,19.85,-9.31,20.0,-2.48,16.02,1.97);
@@ -20,7 +19,7 @@ build1 = function(){
 
 //heart2
 build2 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(15.58,-13.6,19.85,-9.31,20.0,-2.49,16.02,1.97);
 		path.addLine(16.02,1.97,-0.0,18.01);
@@ -39,7 +38,7 @@ build2 = function(){
 
 //heart3
 build3 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(9.0,-18.5,15.08,-18.5,20.0,-13.5,20.0,-6.5);
 		path.addBezier(20.0,-6.5,20.0,7.5,5.0,15.5,0.0,18.5);
@@ -53,7 +52,7 @@ build3 = function(){
 
 //hearts
 build4 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(8.93,-1.56,11.32,-3.94,15.21,-3.94,17.6,-1.56);
 		path.addBezier(17.6,-1.56,20.0,0.82,20.0,4.68,17.6,7.06);
@@ -82,7 +81,7 @@ build4 = function(){
 
 //heartPulse
 build5 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(9.0,-18.5,15.08,-18.5,20.0,-13.5,20.0,-6.5);
 		path.addBezier(20.0,-6.5,20.0,7.5,5.0,15.5,0.0,18.5);
@@ -108,7 +107,7 @@ build5 = function(){
 
 //heartTabler
 build6 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(19.17,-10.02,19.27,-9.93);
 		path.addLine(19.27,-9.93,19.36,-10.01);
@@ -124,7 +123,7 @@ build6 = function(){
 
 //heartBroken
 build7 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(1.2,-5.45,1.2,-2.13);
 		path.addLine(1.2,-2.13,-2.01,4.29);
@@ -150,7 +149,7 @@ build7 = function(){
 
 //heartTiny
 build8 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,18.35,-2.9,15.71);
 		path.addBezier(-2.9,15.71,-13.2,6.37,-20.0,0.21,-20.0,-7.35);
@@ -166,7 +165,7 @@ build8 = function(){
 
 //heartChubby
 build9 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-11.05,-5.21,-20.0,-19.87,-17.39,-19.87,-6.18);
 		path.addBezier(-19.87,-6.18,-19.87,1.54,-10.65,9.43,0.0,20.0);
@@ -178,7 +177,7 @@ build9 = function(){
 
 //heartArrow
 build10 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-14.35,-2.2,-14.35,-4.8,-13.35,-6.4,-11.55);
 		path.addLine(-6.4,-11.55,-9.2,-8.75);
@@ -206,7 +205,7 @@ build10 = function(){
 
 //heartRibbon
 build11 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-18.35,-3.8,-18.35,-7.4,-16.75,-10.0,-14.15);
 		path.addBezier(-10.0,-14.15,-12.6,-16.75,-16.2,-18.35,-20.0,-18.35);
@@ -244,7 +243,7 @@ build11 = function(){
 
 //heartOutline
 build12 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,18.35,-2.9,15.71);
 		path.addBezier(-2.9,15.71,-13.2,6.37,-20.0,0.21,-20.0,-7.35);
@@ -260,7 +259,7 @@ build12 = function(){
 
 //heartSmall
 build13 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,19.38,-3.0,16.62);
 		path.addBezier(-3.0,16.62,-13.5,4.12,-20.0,-1.88,-20.0,-8.88);
@@ -276,7 +275,7 @@ build13 = function(){
 
 //heartBubble
 build14 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-12.16,-20.0,-2.54);
 		path.addBezier(-20.0,-2.54,-20.0,4.74,-14.86,11.0,-7.46,13.86);
@@ -299,7 +298,7 @@ build14 = function(){
 
 //heartDouble
 build15 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,18.35,-2.9,15.71);
 		path.addBezier(-2.9,15.71,-13.2,6.37,-20.0,0.21,-20.0,-7.35);
@@ -327,7 +326,7 @@ build15 = function(){
 
 //heartSparkle
 build16 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-1.22,17.43,-3.59,15.27);
 		path.addBezier(-3.59,15.27,-12.0,7.65,-17.55,2.62,-17.55,-3.55);
@@ -363,7 +362,7 @@ build16 = function(){
 
 //starHalf
 build17 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-1.18,-19.81,-1.04,-19.57);
 		path.addLine(-1.04,-19.57,4.78,-7.78);
@@ -406,7 +405,7 @@ build17 = function(){
 
 //sparkles
 build18 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(-14.29,-8.57,-14.29,-20.0,2.86,-20.0,2.86,-8.57);
 		path.addBezier(2.86,-8.57,14.29,-8.57,14.29,8.57,2.86,8.57);
@@ -417,7 +416,7 @@ build18 = function(){
 
 //star5
 build19 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-19.02,6.18,-6.5);
 		path.addLine(6.18,-6.5,20.0,-4.48);
@@ -435,7 +434,7 @@ build19 = function(){
 
 //starRounded
 build20 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-19.03,6.11,-6.53);
 		path.addLine(6.11,-6.53,20.0,-4.58);
@@ -453,7 +452,7 @@ build20 = function(){
 
 //star4
 build21 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-20.0,4.0,-4.0);
 		path.addLine(4.0,-4.0,20.0,0.0);
@@ -469,7 +468,7 @@ build21 = function(){
 
 //star6
 build22 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-18.18,6.06,-6.06);
 		path.addLine(6.06,-6.06,20.0,-4.24);
@@ -486,7 +485,7 @@ build22 = function(){
 
 //starTiny
 build23 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-19.0,6.0,-7.0);
 		path.addLine(6.0,-7.0,20.0,-5.0);
@@ -504,7 +503,7 @@ build23 = function(){
 
 //sparkle1
 build24 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-20.0,3.33,-3.33);
 		path.addLine(3.33,-3.33,20.0,0.0);
@@ -519,7 +518,7 @@ build24 = function(){
 
 //sparkle2
 build25 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-10.0,-20.0,-8.0,-12.0);
 		path.addLine(-8.0,-12.0,0.0,-10.0);
@@ -543,7 +542,7 @@ build25 = function(){
 
 //sparkle3
 build26 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-14.0,-20.0,-12.8,-15.2);
 		path.addLine(-12.8,-15.2,-8.0,-14.0);
@@ -576,7 +575,7 @@ build26 = function(){
 
 //starNebula
 build27 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-19.0,6.25,-6.5);
 		path.addLine(6.25,-6.5,20.0,-4.5);
@@ -593,7 +592,7 @@ build27 = function(){
 
 //starSpin
 build28 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-20.0,3.0,-8.0);
 		path.addLine(3.0,-8.0,13.75,-14.25);
@@ -616,7 +615,7 @@ build28 = function(){
 
 //shootingStar
 build29 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(20.0,-20.0,3.33,-3.33);
 		path.addLine(3.33,-3.33,15.56,-6.67);
@@ -643,7 +642,7 @@ build29 = function(){
 
 //starHeart
 build30 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-19.0,6.25,-6.5);
 		path.addLine(6.25,-6.5,20.0,-4.5);
@@ -660,7 +659,7 @@ build30 = function(){
 
 //flower
 build31 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.91,-19.53,-0.0,-20.0);
 		path.addLine(-0.0,-20.0,-0.91,-19.53);
@@ -691,7 +690,7 @@ build31 = function(){
 
 //leaf
 build32 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(18.95,-20.0,18.95,-15.79);
 		path.addBezier(18.95,-15.79,18.95,4.48,7.64,13.68,-6.32,13.68);
@@ -711,7 +710,7 @@ build32 = function(){
 
 //plant
 build33 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(19.0,-18.0,19.0,-14.0);
 		path.addBezier(19.0,-14.0,19.0,-6.27,12.73,0.0,5.0,0.0);
@@ -742,7 +741,7 @@ build33 = function(){
 
 //sakura
 build34 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-3.0,-20.0,-5.0,-17.0,-5.0,-17.0);
 		path.addBezier(-5.0,-17.0,-5.0,-17.0,-8.0,-20.0,-11.0,-20.0);
@@ -768,7 +767,7 @@ build34 = function(){
 
 //rose
 build35 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-5.0,-20.0,-9.0,-16.0,-9.0,-11.0);
 		path.addBezier(-9.0,-11.0,-9.0,-9.0,-8.4,-7.2,-7.2,-5.8);
@@ -797,7 +796,7 @@ build35 = function(){
 
 //tulip
 build36 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-6.0,-20.0,-10.0,-14.0,-10.0,-8.0);
 		path.addBezier(-10.0,-8.0,-10.0,-4.0,-8.0,-1.0,-6.0,1.0);
@@ -822,7 +821,7 @@ build36 = function(){
 
 //sunflower
 build37 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-20.0,4.0,-12.0);
 		path.addLine(4.0,-12.0,12.0,-12.0);
@@ -850,7 +849,7 @@ build37 = function(){
 
 //wreath
 build38 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-11.04,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.04,-11.04,20.0,0.0,20.0);
@@ -878,7 +877,7 @@ build38 = function(){
 
 //cake
 build39 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(1.82,-7.64,1.82,-0.37);
 		path.addLine(1.82,-0.37,14.55,-0.37);
@@ -906,7 +905,7 @@ build39 = function(){
 
 //cake2
 build40 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-8.0,-16.0,-8.0,-8.0);
 		path.addLine(-8.0,-8.0,-2.0,-8.0);
@@ -942,7 +941,7 @@ build40 = function(){
 
 //cake3
 build41 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-8.0,-16.0,-8.0,-8.0);
 		path.addLine(-8.0,-8.0,-2.0,-8.0);
@@ -978,7 +977,7 @@ build41 = function(){
 
 //cup
 build42 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(17.78,-20.0,-17.78,-20.0);
 		path.addLine(-17.78,-20.0,-17.78,2.22);
@@ -998,7 +997,7 @@ build42 = function(){
 
 //restaurant
 build43 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(18.0,-20.0,18.0,20.0);
 		path.addLine(18.0,20.0,14.0,20.0);
@@ -1033,7 +1032,7 @@ build43 = function(){
 
 //cookie
 build44 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.05,-20.0,-20.0,-11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.05,-11.05,20.0,0.0,20.0);
@@ -1057,7 +1056,7 @@ build44 = function(){
 
 //beer
 build45 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(14.29,-11.43,10.48,-11.43);
 		path.addLine(10.48,-11.43,10.48,-15.24);
@@ -1091,7 +1090,7 @@ build45 = function(){
 
 //lollipop
 build46 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.05,-20.0,-20.0,-11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.05,-11.05,20.0,0.0,20.0);
@@ -1133,7 +1132,7 @@ build46 = function(){
 
 //donut
 build47 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-11.04,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.04,-11.04,20.0,0.0,20.0);
@@ -1157,7 +1156,7 @@ build47 = function(){
 
 //icecream
 build48 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-7.0,-20.0,-12.0,-15.0,-12.0,-9.0);
 		path.addBezier(-12.0,-9.0,-12.0,-5.0,-10.0,-2.0,-7.0,0.0);
@@ -1177,7 +1176,7 @@ build48 = function(){
 
 //gift
 build49 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(6.0,-12.0,3.4,-12.0,1.2,-10.4,0.4,-8.0);
 		path.addLine(0.4,-8.0,-16.0,-8.0);
@@ -1217,7 +1216,7 @@ build49 = function(){
 
 //gift2
 build50 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(14.55,1.82,14.55,20.0);
 		path.addLine(14.55,20.0,-14.55,20.0);
@@ -1277,7 +1276,7 @@ build50 = function(){
 
 //redPacket
 build51 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(10.0,-20.0,-10.0,-20.0);
 		path.addBezier(-10.0,-20.0,-12.2,-20.0,-14.0,-18.2,-14.0,-16.0);
@@ -1305,7 +1304,7 @@ build51 = function(){
 
 //trophy
 build52 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(4.0,-4.54,4.01,-4.31);
 		path.addLine(4.01,-4.31,4.01,0.03);
@@ -1333,7 +1332,7 @@ build52 = function(){
 
 //confetti
 build53 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-19.76,-16.21,-19.74,-15.95);
 		path.addLine(-19.74,-15.95,-20.0,-15.94);
@@ -1366,7 +1365,7 @@ build53 = function(){
 
 //balloon
 build54 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-8.15,-20.0,-14.74,-13.41,-14.74,-5.26);
 		path.addBezier(-14.74,-5.26,-14.74,-0.25,-12.23,4.15,-8.42,6.82);
@@ -1407,7 +1406,7 @@ build54 = function(){
 
 //crown
 build55 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(14.17,14.37,-13.97,14.37);
 		path.addBezier(-13.97,14.37,-14.97,14.37,-15.78,13.77,-15.98,12.76);
@@ -1429,7 +1428,7 @@ build55 = function(){
 
 //diamond
 build56 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(13.3,-15.25,13.46,-15.02);
 		path.addLine(13.46,-15.02,20.0,-4.12);
@@ -1465,7 +1464,7 @@ build56 = function(){
 
 //magic
 build57 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(2.27,-20.0,5.08,-17.69);
 		path.addLine(5.08,-17.69,-5.6,-4.74);
@@ -1499,7 +1498,7 @@ build57 = function(){
 
 //medal
 build58 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-5.52,-20.0,-10.0,-15.52,-10.0,-10.0);
 		path.addBezier(-10.0,-10.0,-10.0,-6.74,-8.44,-3.82,-6.0,-2.0);
@@ -1521,7 +1520,7 @@ build58 = function(){
 
 //rainbow
 build59 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-12.0,-11.0,-12.0,-20.0,-3.0,-20.0,8.0);
 		path.addLine(-20.0,8.0,-16.0,8.0);
@@ -1549,7 +1548,7 @@ build59 = function(){
 
 //moon
 build60 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(-4.0,-10.0,-4.0,-2.27,2.27,4.0,10.0,4.0);
 		path.addBezier(10.0,4.0,13.92,4.0,17.46,2.39,20.0,-0.2);
@@ -1565,7 +1564,7 @@ build60 = function(){
 
 //sun
 build61 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,10.91,-6.02,10.91,-10.91,6.02,-10.91,0.0);
 		path.addBezier(-10.91,0.0,-10.91,-6.02,-6.02,-10.91,0.0,-10.91);
@@ -1631,7 +1630,7 @@ build61 = function(){
 
 //sunCloudy
 build62 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-10.05,-9.03,10.0,-9.03);
 		path.addLine(10.0,-9.03,20.0,-9.03);
@@ -1649,7 +1648,7 @@ build62 = function(){
 
 //moonCloudy
 build63 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-10.05,-9.03,10.0,-9.03);
 		path.addLine(10.0,-9.03,20.0,-9.03);
@@ -1667,7 +1666,7 @@ build63 = function(){
 
 //flashlight
 build64 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(2.73,-20.0,-12.36,0.0);
 		path.addLine(-12.36,0.0,-0.91,0.0);
@@ -1681,7 +1680,7 @@ build64 = function(){
 
 //thunderstorms
 build65 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(13.55,3.87,13.55,-1.29);
 		path.addLine(13.55,-1.29,14.84,-1.29);
@@ -1704,7 +1703,7 @@ build65 = function(){
 
 //snowy
 build66 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(3.0,4.0,-11.0,4.0);
 		path.addLine(-11.0,4.0,-19.0,4.0);
@@ -1727,7 +1726,7 @@ build66 = function(){
 
 //meteor
 build67 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(15.45,-18.18,-0.18,-2.55);
 		path.addLine(-0.18,-2.55,15.45,0.0);
@@ -1744,7 +1743,7 @@ build67 = function(){
 
 //rainy
 build68 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(10.29,-15.87,12.36,-15.87);
 		path.addLine(12.36,-15.87,12.36,-20.0);
@@ -1774,7 +1773,7 @@ build68 = function(){
 
 //typhoon
 build69 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-11.04,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.04,-11.04,20.0,0.0,20.0);
@@ -1802,7 +1801,7 @@ build69 = function(){
 
 //hail
 build70 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-13.44,6.56,-20.0,0.0);
 		path.addLine(-20.0,0.0,-17.28,-2.72);
@@ -1822,7 +1821,7 @@ build70 = function(){
 
 //sunFoggy
 build71 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.closeFigure();
 		path.startFigure();
@@ -1844,7 +1843,7 @@ build71 = function(){
 
 //flood
 build72 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(-20.0,3.0,-17.0,3.0,-15.0,1.0,-12.0,1.0);
 		path.addBezier(-12.0,1.0,-9.0,1.0,-7.0,3.0,-4.0,3.0);
@@ -1878,7 +1877,7 @@ build72 = function(){
 
 //cloud
 build73 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(12.25,-3.27,11.12,-9.02,6.07,-13.33,0.0,-13.33);
 		path.addBezier(0.0,-13.33,-4.82,-13.33,-9.0,-10.6,-11.08,-6.6);
@@ -1893,7 +1892,7 @@ build73 = function(){
 
 //music
 build74 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-11.43,10.1,-11.43,-20.0);
 		path.addLine(-11.43,-20.0,11.43,-20.0);
@@ -1906,7 +1905,7 @@ build74 = function(){
 
 //music2
 build75 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(12.86,-20.0,12.86,20.0);
 		path.addLine(12.86,20.0,12.86,-11.43);
@@ -1920,7 +1919,7 @@ build75 = function(){
 
 //disc
 build76 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-11.04,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.04,-11.04,20.0,0.0,20.0);
@@ -1950,7 +1949,7 @@ build76 = function(){
 
 //headphone
 build77 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-18.0,-11.04,-18.0,-20.0,-9.04,-20.0,2.0);
 		path.addLine(-20.0,2.0,-20.0,18.0);
@@ -1968,7 +1967,7 @@ build77 = function(){
 
 //mic
 build78 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-3.81,-20.0,-3.81,-6.67);
 		path.addLine(-3.81,-6.67,-3.81,-12.38);
@@ -1985,7 +1984,7 @@ build78 = function(){
 
 //volumeUp
 build79 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-20.0,-6.32,-20.0,6.32);
 		path.addLine(-20.0,6.32,-11.58,6.32);
@@ -2012,7 +2011,7 @@ build79 = function(){
 
 //thumbUp
 build80 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-20.0,17.27,-12.73,17.27);
 		path.addLine(-12.73,17.27,-12.73,-4.55);
@@ -2041,7 +2040,7 @@ build80 = function(){
 
 //chatSmile
 build81 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-14.78,17.94,-5.33,13.83);
 		path.addLine(-5.33,13.83,-3.88,14.06);
@@ -2058,7 +2057,7 @@ build81 = function(){
 
 //emotion
 build82 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-11.05,20.0,-20.0,11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,-11.05,-11.05,-20.0,0.0,-20.0);
@@ -2079,7 +2078,7 @@ build82 = function(){
 
 //emotionHappy
 build83 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-11.05,20.0,-20.0,11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,-11.05,-11.05,-20.0,0.0,-20.0);
@@ -2100,7 +2099,7 @@ build83 = function(){
 
 //emotionSad
 build84 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-11.05,20.0,-20.0,11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,-11.05,-11.05,-20.0,0.0,-20.0);
@@ -2122,7 +2121,7 @@ build84 = function(){
 
 //userStar
 build85 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,0.0,0.0,20.0);
 		path.addLine(0.0,20.0,-10.0,15.0);
@@ -2147,7 +2146,7 @@ build85 = function(){
 
 //moodHappy
 build86 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(15.67,-17.5,15.65,-18.75);
 		path.addLine(15.65,-18.75,15.67,-20.0);
@@ -2171,7 +2170,7 @@ build86 = function(){
 
 //earth
 build87 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-11.05,20.0,-20.0,11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,-11.05,-11.05,-20.0,0.0,-20.0);
@@ -2197,7 +2196,7 @@ build87 = function(){
 
 //compass
 build88 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-11.05,20.0,-20.0,11.05,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,-11.05,-11.05,-20.0,0.0,-20.0);
@@ -2216,7 +2215,7 @@ build88 = function(){
 
 //mapPin
 build89 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(2.86,12.86,-2.86,7.14,-8.57,2.14,-8.57,-4.29);
 		path.addBezier(-8.57,-4.29,-8.57,2.14,-14.29,7.14,-20.0,12.86);
@@ -2230,7 +2229,7 @@ build89 = function(){
 
 //sailboat
 build90 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-20.0,11.11,20.0,11.11);
 		path.addLine(20.0,11.11,13.33,20.0);
@@ -2247,7 +2246,7 @@ build90 = function(){
 
 //rocket2
 build91 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-12.78,16.67,-6.11,10.0);
 		path.addLine(-6.11,10.0,-2.78,13.33);
@@ -2264,7 +2263,7 @@ build91 = function(){
 
 //flame
 build92 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,20.0,-8.67,20.0,-15.56,13.11,-15.56,4.44);
 		path.addBezier(-15.56,4.44,-15.56,-3.33,-10.89,-8.44,-7.78,-12.0);
@@ -2285,7 +2284,7 @@ build92 = function(){
 
 //cat
 build93 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-5.0,-20.0,-10.0,-17.5,-12.5,-12.5);
 		path.addLine(-12.5,-12.5,-15.0,-20.0);
@@ -2314,7 +2313,7 @@ build93 = function(){
 
 //dog
 build94 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-10.67,-20.0,-18.67,-12.0,-18.67,-1.33);
 		path.addLine(-18.67,-1.33,-18.67,9.33);
@@ -2338,7 +2337,7 @@ build94 = function(){
 
 //butterfly
 build95 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(0.0,-20.0,0.0,20.0);
 		path.closeFigure();
@@ -2361,7 +2360,7 @@ build95 = function(){
 
 //fish
 build96 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(-1.05,-18.95,-11.58,-18.95,-20.0,-11.37,-20.0,-2.11);
 		path.addBezier(-20.0,-2.11,-20.0,7.16,-11.58,14.74,-1.05,14.74);
@@ -2378,7 +2377,7 @@ build96 = function(){
 
 //ghost
 build97 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(1.11,-20.0,-8.67,-20.0,-16.67,-12.0,-16.67,-2.22);
 		path.addLine(-16.67,-2.22,-16.67,20.0);
@@ -2400,7 +2399,7 @@ build97 = function(){
 
 //penguin
 build98 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-6.6,-20.0,-12.0,-14.6,-12.0,-8.0);
 		path.addLine(-12.0,-8.0,-12.0,-2.0);
@@ -2425,7 +2424,7 @@ build98 = function(){
 
 //rabbit
 build99 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(-3.0,-20.0,-6.0,-20.0,-8.0,-17.0,-8.0,-13.0);
 		path.addLine(-8.0,-13.0,-8.0,-4.0);
@@ -2452,7 +2451,7 @@ build99 = function(){
 
 //bear
 build100 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-8.8,-20.0,-16.0,-12.8,-16.0,-4.0);
 		path.addBezier(-16.0,-4.0,-16.0,-1.0,-15.2,1.8,-14.0,4.2);
@@ -2479,7 +2478,7 @@ build100 = function(){
 
 //fairyWand
 build101 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addLine(-9.0,-10.8,-4.0,-8.0);
 		path.addLine(-4.0,-8.0,-6.8,-13.0);
@@ -2508,7 +2507,7 @@ build101 = function(){
 
 //bubble
 build102 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.addBezier(0.0,-20.0,-11.04,-20.0,-20.0,-11.04,-20.0,0.0);
 		path.addBezier(-20.0,0.0,-20.0,11.04,-11.04,20.0,0.0,20.0);
@@ -2532,7 +2531,7 @@ build102 = function(){
 
 //candy
 build103 = function(){
-	var path = ..gdip.path(1/*_FillModeWinding*/);
+	var path = gdip.path(1/*_FillModeWinding*/);
 		path.startFigure();
 		path.closeFigure();
 		path.startFigure();
@@ -2665,114 +2664,9 @@ var builders = {
 buildAll = function(){
 	var paths = {};
 	for(i=1;#builders;1){
-		..table.push(paths, builders[i]());
+		table.push(paths, builders[i]());
 	}
 	return paths;
 }
 
-/**intellisense()
-shapeData.buildAll() = 批量构建所有图形路径，返回path对象数组
-shapeData.build1() = heart
-shapeData.build2() = heart2
-shapeData.build3() = heart3
-shapeData.build4() = hearts
-shapeData.build5() = heartPulse
-shapeData.build6() = heartTabler
-shapeData.build7() = heartBroken
-shapeData.build8() = heartTiny
-shapeData.build9() = heartChubby
-shapeData.build10() = heartArrow
-shapeData.build11() = heartRibbon
-shapeData.build12() = heartOutline
-shapeData.build13() = heartSmall
-shapeData.build14() = heartBubble
-shapeData.build15() = heartDouble
-shapeData.build16() = heartSparkle
-shapeData.build17() = starHalf
-shapeData.build18() = sparkles
-shapeData.build19() = star5
-shapeData.build20() = starRounded
-shapeData.build21() = star4
-shapeData.build22() = star6
-shapeData.build23() = starTiny
-shapeData.build24() = sparkle1
-shapeData.build25() = sparkle2
-shapeData.build26() = sparkle3
-shapeData.build27() = starNebula
-shapeData.build28() = starSpin
-shapeData.build29() = shootingStar
-shapeData.build30() = starHeart
-shapeData.build31() = flower
-shapeData.build32() = leaf
-shapeData.build33() = plant
-shapeData.build34() = sakura
-shapeData.build35() = rose
-shapeData.build36() = tulip
-shapeData.build37() = sunflower
-shapeData.build38() = wreath
-shapeData.build39() = cake
-shapeData.build40() = cake2
-shapeData.build41() = cake3
-shapeData.build42() = cup
-shapeData.build43() = restaurant
-shapeData.build44() = cookie
-shapeData.build45() = beer
-shapeData.build46() = lollipop
-shapeData.build47() = donut
-shapeData.build48() = icecream
-shapeData.build49() = gift
-shapeData.build50() = gift2
-shapeData.build51() = redPacket
-shapeData.build52() = trophy
-shapeData.build53() = confetti
-shapeData.build54() = balloon
-shapeData.build55() = crown
-shapeData.build56() = diamond
-shapeData.build57() = magic
-shapeData.build58() = medal
-shapeData.build59() = rainbow
-shapeData.build60() = moon
-shapeData.build61() = sun
-shapeData.build62() = sunCloudy
-shapeData.build63() = moonCloudy
-shapeData.build64() = flashlight
-shapeData.build65() = thunderstorms
-shapeData.build66() = snowy
-shapeData.build67() = meteor
-shapeData.build68() = rainy
-shapeData.build69() = typhoon
-shapeData.build70() = hail
-shapeData.build71() = sunFoggy
-shapeData.build72() = flood
-shapeData.build73() = cloud
-shapeData.build74() = music
-shapeData.build75() = music2
-shapeData.build76() = disc
-shapeData.build77() = headphone
-shapeData.build78() = mic
-shapeData.build79() = volumeUp
-shapeData.build80() = thumbUp
-shapeData.build81() = chatSmile
-shapeData.build82() = emotion
-shapeData.build83() = emotionHappy
-shapeData.build84() = emotionSad
-shapeData.build85() = userStar
-shapeData.build86() = moodHappy
-shapeData.build87() = earth
-shapeData.build88() = compass
-shapeData.build89() = mapPin
-shapeData.build90() = sailboat
-shapeData.build91() = rocket2
-shapeData.build92() = flame
-shapeData.build93() = cat
-shapeData.build94() = dog
-shapeData.build95() = butterfly
-shapeData.build96() = fish
-shapeData.build97() = ghost
-shapeData.build98() = penguin
-shapeData.build99() = rabbit
-shapeData.build100() = bear
-shapeData.build101() = fairyWand
-shapeData.build102() = bubble
-shapeData.build103() = candy
-end intellisense**/
+return { buildAll = buildAll };

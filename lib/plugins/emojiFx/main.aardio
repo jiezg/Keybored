@@ -1,11 +1,17 @@
-//emojiFx 按键喷图动画效果模块
-//在独立线程中运行动画窗口和渲染循环，与钩子线程彻底解耦
-//使用 thread.table 共享表进行跨线程通信
-//保留 win.ui.layered 做窗口初始化，覆盖 redraw 使用缓存渲染资源
+//emojiFx 按键喷图动画插件
+//订阅按键事件，触发喷图动画
+//由 plugin.loadAll() 通过 loadcodex 加载
+import plugin;
 import win.ui;
 import thread.table;
 
-namespace emojiFx;
+//获取加载上下文
+var ctx = plugin.getCurrentContext();
+var pluginId = ctx.pluginId;
+var ownerForm = ctx.ownerForm;
+
+//获取插件目录路径（动画线程内用 loadcodex 加载 shapeData）
+var pluginDir = plugin.getPluginDir();
 
 //动画线程句柄
 var animThreadHandle = null;
@@ -26,28 +32,36 @@ var MAX_PARTICLES = 30;
 var EMITS_PER_TICK = 2;
 
 //初始化动画模块（启动独立动画线程）
-init = function(ownerForm){
+var init = function(ownerForm){
 	if(animThreadHandle) return;
 
 	//创建跨线程通信共享表
-	emitQueue = ..thread.table("{B8E2F1A3-EMOJI-FX01-QUEUE}");
-	controlTable = ..thread.table("{B8E2F1A3-EMOJI-FX01-CTRL}");
+	emitQueue = thread.table("{B8E2F1A3-EMOJI-FX01-QUEUE}");
+	controlTable = thread.table("{B8E2F1A3-EMOJI-FX01-CTRL}");
 	controlTable.dispose = false;
+	controlTable.maxParticles = MAX_PARTICLES;
+	controlTable.riseScale = 1.0;
+
+	//获取 shapeData 文件路径，传入动画线程在线程内加载（函数引用无法跨线程序列化）
+	var shapeDataPath = pluginDir + "emojiFx\shapeData.aardio";
 
 	//启动动画线程，传递共享表和常量作为参数（子线程无法访问外部闭包上值）
-	animThreadHandle = ..thread.create(
-		function(emitQueue, controlTable, colorPool, maxParticles, emitsPerTick){
+	animThreadHandle = thread.create(
+		function(emitQueue, controlTable, colorPool, maxParticles, emitsPerTick, shapeDataPath){
 			//在子线程中需要重新import所有依赖
 			import win.ui;
 			import win.ui.layered;
+			import gdip.path;
 			import gdip.solidBrush;
 			import gdip.bitmap;
 			import gdip.graphics;
 			import gdi;
-			import shapeData;
 
 			//获取屏幕尺寸
 			var screenW, screenH = win.getScreen();
+
+			//以1080p为基准的自适应缩放因子
+			var scaleFactor = screenH / 1080;
 
 			//创建全屏透明分层窗口
 			var fxForm = win.form(
@@ -65,7 +79,8 @@ init = function(ownerForm){
 			//用 win.ui.layered 初始化分层窗口（设置透明、背景等）
 			var layeredWnd = win.ui.layered(fxForm, -1);
 
-			//构建矢量图形路径（必须在同一线程）
+			//在线程内加载 shapeData 并构建矢量图形路径（GDI+对象必须在同一线程创建）
+			var shapeData = loadcodex(shapeDataPath);
 			var shapePaths = shapeData.buildAll();
 
 			//缓存画刷
@@ -155,29 +170,35 @@ init = function(ownerForm){
 					return;
 				}
 
+				//动态读取参数（设置页可实时修改）
+				if(controlTable.maxParticles) maxParticles = controlTable.maxParticles;
+				var riseScale = controlTable.riseScale ? controlTable.riseScale : 1.0;
+
 				//从共享队列读取emit数据并创建粒子
 				var emitCount = math.min(emitQueue.len(), emitsPerTick);
 				for(q=1;emitCount;1){
 					emitQueue.pop(1); //消费队列项
 					if(#particles >= maxParticles){
-						table.remove(particles, 1);
+						//随机移除一个粒子，让不同生命阶段的粒子共存
+						var removeIdx = math.random(1, #particles);
+						table.remove(particles, removeIdx);
 					}
 
 					var shape = shapePaths[math.random(1, #shapePaths)];
 					var color = colorPool[math.random(1, #colorPool)];
-					var startX = screenW - math.random(50, 200);
-					var startY = screenH - math.random(20, 60);
+					var startX = screenW - math.random(50, 200) * scaleFactor;
+					var startY = screenH - math.random(20, 60) * scaleFactor;
 
 					table.push(particles, {
 						shape = shape;
 						color = color;
 						x = startX; y = startY;
 						startX = startX; startY = startY;
-						driftX = math.random(-100, 100);
-						riseHeight = math.random(300, 500);
+						driftX = math.random(-100, 100) * scaleFactor;
+						riseHeight = math.random(300, 500) * scaleFactor * riseScale;
 						rotation = math.random(-30, 30);
 						rotationSpeed = math.random(-3, 3);
-						scale = 0.6 + math.random() * 0.8;
+						scale = (0.6 + math.random() * 0.8) * scaleFactor;
 						progress = 0;
 						speed = 0.008 + math.random() * 0.006;
 					});
@@ -217,24 +238,46 @@ init = function(ownerForm){
 			if(cachedGraphics){
 				cachedGraphics.delete();
 			}
-		}, emitQueue, controlTable, colorPool, MAX_PARTICLES, EMITS_PER_TICK
+		}, emitQueue, controlTable, colorPool, MAX_PARTICLES, EMITS_PER_TICK, shapeDataPath
 	);
 }
 
+//设置最大粒子数（通过共享表传递给动画线程，实时生效）
+var setMaxParticles = function(n){
+	MAX_PARTICLES = n;
+	if(controlTable) controlTable.maxParticles = n;
+}
+
+//获取最大粒子数
+var getMaxParticles = function(){
+	return MAX_PARTICLES;
+}
+
+//设置上升高度倍率（通过共享表传递给动画线程，实时生效）
+var setRiseScale = function(s){
+	if(controlTable) controlTable.riseScale = s;
+}
+
+//获取上升高度倍率
+var getRiseScale = function(){
+	if(controlTable) return controlTable.riseScale : 1.0;
+	return 1.0;
+}
+
 //触发喷图（跨线程共享表，钩子回调零开销）
-emit = function(vkcode){
+var emit = function(vkcode){
 	if(!emitQueue) return;
 	emitQueue.push(vkcode);
 }
 
 //清理资源（通知动画线程退出）
-dispose = function(){
+var dispose = function(){
 	if(!controlTable) return;
 	controlTable.dispose = true;
 	//等待动画线程退出（最多1秒）
 	if(animThreadHandle){
-		..thread.waitOne(animThreadHandle, 1000);
-		..raw.closeHandle(animThreadHandle);
+		thread.waitOne(animThreadHandle, 1000);
+		raw.closeHandle(animThreadHandle);
 		animThreadHandle = null;
 	}
 	//释放共享表
@@ -246,8 +289,83 @@ dispose = function(){
 	controlTable = null;
 }
 
-/**intellisense()
-emojiFx.init(.(ownerForm) = 初始化动画模块，在独立线程中运行
-emojiFx.emit(.(vkcode) = 触发喷图效果（跨线程共享表，钩子回调零开销）
-emojiFx.dispose() = 清理资源（通知动画线程退出）
-end intellisense**/
+//插件运行状态
+var running = false;
+
+//插件实例
+var instance = {};
+
+instance.start = function(){
+	if(running) return;
+	running = true;
+	//启动时订阅事件（必须在注册之后调用subscribe才有效）
+	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, function(data){
+		if(!running) return;
+		emit(data.vkcode);
+	});
+	plugin.subscribe(pluginId, plugin.events.LONG_PRESS, function(data){
+		if(!running) return;
+		emit(data.vkcode);
+	});
+	init(ownerForm);
+	//初始化后报告运行状态
+	plugin.reportStatus(pluginId, "运行中");
+};
+
+instance.stop = function(){
+	if(!running) return;
+	running = false;
+	//停止时取消所有订阅
+	plugin.unsubscribeAll(pluginId);
+	dispose();
+	plugin.reportStatus(pluginId, "已停止");
+};
+
+instance.dispose = function(){
+	running = false;
+	dispose();
+};
+
+instance.showSettings = function(parentForm){
+	//弹出喷图设置对话框
+	var settingsForm = win.form(text="按键喷图 设置";right=300;bottom=240;parent=parentForm;border="dialog window");
+	settingsForm.add(
+		staticMax={cls="static";text="最大粒子数:";left=10;top=20;right=100;bottom=40;transparent=1};
+		editMax={cls="edit";text=tostring(getMaxParticles());left=110;top=15;right=180;bottom=38;edge=1};
+		staticMaxTip={cls="static";text="(5~200)";left=185;top=20;right=260;bottom=40;transparent=1};
+		staticRise={cls="static";text="上升高度:";left=10;top=55;right=100;bottom=75;transparent=1};
+		editRise={cls="edit";text=tostring(getRiseScale());left=110;top=50;right=180;bottom=73;edge=1};
+		staticRiseTip={cls="static";text="倍率(0.5~3.0)";left=185;top=55;right=280;bottom=75;transparent=1};
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=90;right=200;bottom=110;checked=plugin.getAutoStart(pluginId)};
+		btnOk={cls="button";text="确定";left=60;top=150;right=150;bottom=180};
+		btnCancel={cls="button";text="取消";left=170;top=150;right=260;bottom=180};
+	);
+	settingsForm.btnOk.oncommand = function(id, event){
+		//验证并应用最大粒子数
+		var maxP = tonumber(settingsForm.editMax.text);
+		if(!maxP || maxP < 5 || maxP > 200){
+			settingsForm.editMax.text = tostring(getMaxParticles());
+			return;
+		}
+		setMaxParticles(maxP);
+
+		//验证并应用上升高度倍率
+		var riseS = tonumber(settingsForm.editRise.text);
+		if(!riseS || riseS < 0.5 || riseS > 3.0){
+			settingsForm.editRise.text = tostring(getRiseScale());
+			return;
+		}
+		setRiseScale(riseS);
+
+		//保存自动启动设置
+		plugin.setAutoStart(pluginId, settingsForm.chkAutoStart.checked);
+		settingsForm.close();
+	};
+	settingsForm.btnCancel.oncommand = function(id, event){
+		settingsForm.close();
+	};
+	settingsForm.doModal();
+};
+
+//返回实例表（loadcodex 的返回值会被 plugin.register 保存）
+return instance;

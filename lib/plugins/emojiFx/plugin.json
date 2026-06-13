@@ -1,0 +1,9 @@
+{
+    "autoStart":true,
+    "description":"按键时从屏幕右下角喷出矢量图形动画",
+    "entry":"main.aardio",
+    "hasSettings":true,
+    "id":"emojiFx",
+    "name":"按键喷图",
+    "version":"1.0.0"
+}

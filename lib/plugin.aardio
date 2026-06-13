@@ -1,0 +1,305 @@
+//plugin 插件管理器（纯管理，不含业务逻辑）
+//提供事件分发、插件注册/卸载/启停、列表UI更新
+//由 listener.$log 调用 onKeyEvent 同步分发
+import fsys;
+import web.json;
+
+namespace plugin;
+
+//事件类型常量（与 listener.$log 的 kAct 对应）
+events = {
+	KEY_DOWN = 1;   // 按下
+	KEY_UP = 2;     // 弹起
+	LONG_PRESS = 3; // 长按
+	BLOCKED = 4;    // 屏蔽
+}
+
+//已注册插件表 {pluginId = {config, subscribers, instance, status}}
+var registeredPlugins = {};
+
+//获取插件目录（发布后从 EXE 同级的 plugins/ 加载，开发时从 lib\plugins\ 加载）
+getPluginDir = function(){
+	var pubDir = ..io.fullpath("plugins/");
+	if(..fsys.isDir(pubDir)) return pubDir;
+	return ..io.fullpath("lib\plugins\");
+}
+
+//当前加载上下文（供插件入口读取）
+var _currentPluginId = null;
+var _currentOwnerForm = null;
+
+//插件列表UI引用（由主程序设置）
+var _listviewRef = null;
+
+//由 listener.$log 调用，同步分发给订阅插件
+onKeyEvent = function(kAct, vkcode, timeStamp){
+	//快速检查：是否有订阅者
+	var hasSubscriber = false;
+	for(pluginId, plugin in registeredPlugins){
+		if(plugin && plugin.subscribers[kAct] && #plugin.subscribers[kAct] > 0){
+			hasSubscriber = true;
+			break;
+		}
+	}
+	if(!hasSubscriber) return;
+
+	//构建事件数据
+	var eventData = {vkcode=vkcode; timestamp=timeStamp};
+
+	//分发给订阅插件
+	for(pluginId, plugin in registeredPlugins){
+		if(!plugin) continue;
+		var callbacks = plugin.subscribers[kAct];
+		if(!callbacks) continue;
+		for(j=1;#callbacks;1){
+			callbacks[j](eventData);
+		}
+	}
+}
+
+//注册插件
+register = function(pluginId, pluginConfig, pluginInstance){
+	if(registeredPlugins[pluginId]){
+		return false;
+	}
+	registeredPlugins[pluginId] = {
+		config = pluginConfig;
+		instance = pluginInstance; //插件实例对象（有start/stop/dispose/showSettings方法）
+		subscribers = {}; // {eventName = {callback1, callback2, ...}}
+		status = "已停止";
+	};
+	return true;
+}
+
+//卸载插件
+unregister = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+	plugin.subscribers = {};
+	if(plugin.instance && plugin.instance.dispose){
+		plugin.instance.dispose();
+	}
+	registeredPlugins[pluginId] = null;
+}
+
+//启动插件
+start = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin || !plugin.instance) return;
+	if(plugin.instance.start){
+		plugin.instance.start();
+	}
+	//如果插件未通过 reportStatus 报告状态，默认标记运行中（兼容简单插件）
+	if(plugin.status == "已停止"){
+		plugin.status = "运行中";
+	}
+	updateListUI();
+}
+
+//停止插件
+stop = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin || !plugin.instance) return;
+	if(plugin.instance.stop){
+		plugin.instance.stop();
+	}
+	plugin.status = "已停止";
+	updateListUI();
+}
+
+//插件主动报告运行状态
+reportStatus = function(pluginId, status){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+	plugin.status = status;
+	updateListUI();
+}
+
+//显示插件设置对话框
+showSettings = function(pluginId, parentForm){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin || !plugin.instance) return;
+	if(plugin.instance.showSettings){
+		plugin.instance.showSettings(parentForm);
+	}
+}
+
+//订阅事件（插件调用）
+subscribe = function(pluginId, eventName, callback){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+
+	if(!plugin.subscribers[eventName]){
+		plugin.subscribers[eventName] = {};
+	}
+	..table.push(plugin.subscribers[eventName], callback);
+}
+
+//取消订阅
+unsubscribe = function(pluginId, eventName, callback){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+
+	var list = plugin.subscribers[eventName];
+	if(!list) return;
+
+	for(i=1;#list;1){
+		if(list[i] === callback){
+			..table.remove(list, i);
+			return;
+		}
+	}
+}
+
+//取消插件所有事件订阅
+unsubscribeAll = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+	plugin.subscribers = {};
+}
+
+//获取当前加载上下文（插件入口调用）
+getCurrentContext = function(){
+	return {
+		pluginId = _currentPluginId;
+		ownerForm = _currentOwnerForm;
+	};
+}
+
+//设置列表UI引用（由主程序调用）
+setListviewRef = function(listview){
+	_listviewRef = listview;
+}
+
+//更新插件列表UI
+updateListUI = function(){
+	if(!_listviewRef) return;
+
+	_listviewRef.clear();
+	for(pluginId, plugin in registeredPlugins){
+		if(!plugin) continue;
+		_listviewRef.addItem({
+			plugin.config.name : pluginId;
+			plugin.config.version : "";
+			plugin.status;
+			plugin.config.hasSettings ? "⚙" : "";
+		});
+	}
+}
+
+//获取插件列表
+getPluginList = function(){
+	var list = {};
+	for(pluginId, plugin in registeredPlugins){
+		if(!plugin) continue;
+		..table.push(list, {
+			id = pluginId;
+			name = plugin.config.name : pluginId;
+			version = plugin.config.version : "";
+			status = plugin.status;
+			hasSettings = plugin.config.hasSettings : false;
+		});
+	}
+	return list;
+}
+
+//加载所有插件（从插件目录扫描 plugin.json）
+loadAll = function(ownerForm){
+	var pluginDir = getPluginDir();
+	if(!..fsys.isDir(pluginDir)) return;
+
+	..fsys.enum(pluginDir, "*.json",
+		function(dir, filename, fullpath){
+			var jsonText = ..string.load(fullpath);
+			if(!jsonText) return;
+
+			var config;
+			try{
+				config = ..web.json.parse(jsonText);
+			}
+			catch(e){
+				return;
+			}
+
+			if(!config.id || !config.entry) return;
+			if(registeredPlugins[config.id]) return;
+
+			var entryPath = pluginDir + config.id + "\" + config.entry;
+
+			//设置加载上下文
+			_currentPluginId = config.id;
+			_currentOwnerForm = ownerForm;
+
+			var pluginInstance = null;
+			try{
+				pluginInstance = ..loadcodex(entryPath);
+			}
+			catch(e){
+				..io.print("插件加载失败: " + config.id + " - " + ..tostring(e));
+			}
+
+			if(pluginInstance){
+				register(config.id, config, pluginInstance);
+				if(config.autoStart !== false) start(config.id);
+			}
+			else{
+				..io.print("插件入口返回空: " + config.id);
+			}
+
+			_currentPluginId = null;
+			_currentOwnerForm = null;
+		}, true
+	);
+
+	updateListUI();
+}
+
+//保存插件配置到 plugin.json
+saveConfig = function(pluginId, config){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return;
+	..table.mix(plugin.config, config);
+	var configPath = getPluginDir() + pluginId + "\plugin.json";
+	var jsonText = ..web.json.stringify(plugin.config, true);
+	..string.save(configPath, jsonText);
+};
+
+//设置插件是否自动启动
+setAutoStart = function(pluginId, enabled){
+	saveConfig(pluginId, {autoStart = enabled});
+};
+
+//获取插件是否自动启动
+getAutoStart = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return true; // 默认自动启动
+	return plugin.config.autoStart !== false;
+};
+
+//清理所有插件
+disposeAll = function(){
+	for(pluginId in registeredPlugins){
+		unregister(pluginId);
+	}
+	registeredPlugins = {};
+}
+
+/**intellisense()
+plugin.onKeyEvent(.(动作类型, 虚拟键码, 时间戳) = 由listener.$log调用，同步分发给插件
+plugin.register(.(插件ID, 插件配置, 插件实例) = 注册插件
+plugin.unregister(.(插件ID) = 卸载插件
+plugin.start(.(插件ID) = 启动插件
+plugin.stop(.(插件ID) = 停止插件
+plugin.reportStatus(.(插件ID, 状态文本) = 插件主动报告运行状态
+plugin.showSettings(.(插件ID, 父窗口) = 显示插件设置对话框
+plugin.subscribe(.(插件ID, 事件名, 回调函数) = 订阅事件
+plugin.unsubscribe(.(插件ID, 事件名, 回调函数) = 取消订阅
+plugin.getCurrentContext() = 获取当前加载上下文
+plugin.setListviewRef(.(listview控件) = 设置列表UI引用
+plugin.updateListUI() = 更新插件列表UI
+plugin.getPluginList() = 获取插件列表
+plugin.loadAll(.(主窗口) = 加载所有插件
+plugin.getPluginDir() = 获取插件目录路径
+plugin.disposeAll() = 清理所有插件
+plugin.events = 事件类型常量表
+end intellisense**/
