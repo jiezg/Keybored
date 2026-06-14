@@ -2,18 +2,21 @@
 
 一个本用于修复键盘连击问题的Windows桌面工具，加入了喷薄而出的彩蛋特效，我愿称之为“键下生花”。（基于 [aardio](https://www.aardio.com/) 开发）
 
-![Screenshot](ScreenShot.png)
+![Screenshot](poster.png)
 
 ## 功能特性
 
 - **键盘抖动屏蔽** — 检测并屏蔽因键盘硬件问题导致的连击（chattering），可自定义阈值（1~2000ms）
 - **实时日志** — 记录所有按键事件，屏蔽（红色）、长按（蓝色）彩色标注
 - **统计面板** — 按键抖动次数、连击间隔统计，按频率排序
+- **插件系统** — 支持动态加载插件，内置按键喷图动画效果，可扩展
 - **最小化托盘** — 关闭窗口自动最小化到系统托盘，右键菜单操作
 
 ## 下载安装
 
-从 [Releases](https://github.com/jiezg/Keybored/releases) 页面下载最新版 `Keybored.exe`，无需安装，直接运行。
+从 [Releases](https://github.com/jiezg/Keybored/releases) 页面下载最新版压缩包，解压后运行 `Keybored.exe`。
+
+> 注意：请确保 `plugins/` 目录与 `Keybored.exe` 在同一目录下，否则插件无法加载。
 
 ### 操作类型说明
 
