@@ -1,0 +1,592 @@
+//keyword 神秘暗号插件
+//识别连续按键序列，触发彩蛋动作
+//由 plugin.loadAll() 通过 loadcodex 加载
+import plugin;
+import win.ui;
+import win.ui.layered;
+import gdip.path;
+import gdip.solidBrush;
+import gdip.pen;
+import gdip.bitmap;
+import gdip.graphics;
+import gdi;
+import key;
+import thread.table;
+import fsys;
+import fsys.dlg;
+import process;
+
+//获取加载上下文
+var ctx = plugin.getCurrentContext();
+var pluginId = ctx.pluginId;
+var ownerForm = ctx.ownerForm;
+var pluginConfig = ctx.config;
+var pluginDir = plugin.getPluginDir();
+
+//默认值
+var DEFAULT_KEYWORD = "keybored";
+var DEFAULT_TIMEOUT = 1000;
+var DEFAULT_ACTION_TYPE = "firework";
+
+//从配置读取参数
+var KEYWORD = pluginConfig.keyword || DEFAULT_KEYWORD;
+var TIMEOUT = pluginConfig.timeout || DEFAULT_TIMEOUT;
+var ACTION_TYPE = pluginConfig.actionType || DEFAULT_ACTION_TYPE;
+var ACTION_PATH = pluginConfig.actionPath || "";
+
+//运行状态
+var running = false;
+
+//按键匹配状态
+var currentPos = 0;
+var lastMatchTime = 0;
+
+//进度条窗口相关
+var progressBar = null;
+var progressAlpha = 0;
+var progressState = "hidden"; // hidden / showing / active / fading / flashing / done
+var progressTimer = null;
+var flashCount = 0;
+
+//超时检测定时器
+var timeoutCheckTimer = null;
+
+//礼花动画线程
+var fireworkThreadHandle = null;
+
+//vkcode 到字符的映射表
+var vkToChar = {};
+for(i=0x41;0x5A;1){ vkToChar[i] = string.pack(i); }
+for(i=0x30;0x39;1){ vkToChar[i] = string.pack(i); }
+vkToChar[0xBD] = "-"; vkToChar[0xBB] = "=";
+vkToChar[0xDB] = "["; vkToChar[0xDD] = "]";
+vkToChar[0xBA] = ";"; vkToChar[0xDE] = "'";
+vkToChar[0xC0] = "`"; vkToChar[0xDC] = "\\";
+vkToChar[0xBE] = "."; vkToChar[0xBF] = "/";
+vkToChar[0xBC] = ",";
+
+var vkToCharStr = function(vkcode){
+	var ch = vkToChar[vkcode];
+	if(ch) return string.upper(ch);
+	var name = key.getName(vkcode);
+	if(name && #name == 1) return string.upper(name);
+	return null;
+}
+
+//===== 进度条 =====
+
+var createProgressBar = function(){
+	if(progressBar) return;
+	var screenW, screenH = win.getScreen();
+	var barW = math.floor(screenW * 0.5);
+	var barH = 8;  //更细的进度条
+	var barX = math.floor((screenW - barW) / 2);
+	var barY = 24;
+	var barRadius = 4; //圆角半径
+
+	var barForm = win.form(
+		right = screenW;
+		bottom = screenH;
+		border = "none";
+		title = "";
+		topmost = true;
+		transparent = true;
+	);
+	barForm.modifyStyleEx(0, 0x20);       //WS_EX_TRANSPARENT
+	barForm.modifyStyleEx(0, 0x80);       //WS_EX_TOOLWINDOW
+	barForm.modifyStyleEx(0x40000, 0);    //移除 WS_EX_APPWINDOW
+	barForm.modifyStyleEx(0, 0x08000000); //WS_EX_NOACTIVATE 不抢焦点
+
+	var layeredWnd = win.ui.layered(barForm, -1);
+
+	var hwnd = barForm.hwnd;
+	var hdc = ::GetDC(hwnd);
+	var hMemDc = ::CreateCompatibleDC(hdc);
+	var hMemBmp = ::Gdi32.CreateDIBSectionP(hMemDc, {
+		INT cbSize = 40;
+		int cx = screenW;
+		int cy = -screenH;
+		WORD planes = 1;
+		WORD bitCount = 32;
+		INT compression;
+		INT size;
+		int xpm;
+		int ypm;
+		INT clrUsed;
+		INT clrImportant;
+	}, 0, {ptr v}, null, 0);
+	var hOldBmp = ::SelectObject(hMemDc, hMemBmp);
+	var cachedGraphics = gdip.graphics(hMemDc);
+	cachedGraphics.smoothingMode = 2;
+
+	//预创建GDI+对象，避免每帧创建/销毁
+	var bgBrush = gdip.solidBrush(0x00222222);
+	var fillBrush = gdip.solidBrush(0x00000000);
+	var hlBrush = gdip.solidBrush(0x00FFFFFF);
+	var borderPen = gdip.pen(0x00FFFFFF, 0.8);
+	var bgPath = gdip.path(1);
+	var fillPath = gdip.path(1);
+	var hlPath = gdip.path(1);
+	var borderPath = gdip.path(1);
+
+	//覆盖 redraw：玻璃效果进度条
+	layeredWnd.redraw = function(){
+		cachedGraphics.clear(0x00000000);
+
+		if(progressAlpha <= 0) {
+			gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+			return;
+		}
+
+		var alpha = progressAlpha;
+
+		//第1层：半透明深色背景条（毛玻璃底）
+		var bgAlpha = math.floor(alpha * 0.35);
+		bgBrush.color = (bgAlpha << 24) | 0x222222;
+		bgPath.reset();
+		bgPath.addRoundRect(barX, barY, barW, barH, barRadius);
+		bgPath.fill(cachedGraphics, bgBrush);
+
+		//第2层：进度填充（渐变色：绿→黄→红）
+		var kwLen = #KEYWORD;
+		if(kwLen > 0 && currentPos > 0){
+			var ratio = currentPos / kwLen;
+			var fillW = math.max(barRadius * 2, math.floor(barW * ratio));
+			if(fillW > 0){
+				var r, g;
+				if(ratio < 0.5){
+					r = math.floor(255 * ratio * 2);
+					g = 255;
+				} else {
+					r = 255;
+					g = math.floor(255 * (1 - ratio) * 2);
+				}
+				var fillAlpha = math.floor(alpha * 0.8);
+				fillBrush.color = (fillAlpha << 24) | (r << 16) | (g << 8);
+				fillPath.reset();
+				fillPath.addRoundRect(barX, barY, fillW, barH, barRadius);
+				fillPath.fill(cachedGraphics, fillBrush);
+
+				//第3层：顶部高光线（1px白色，模拟玻璃反光）
+				var hlAlpha = math.floor(alpha * 0.5);
+				hlBrush.color = (hlAlpha << 24) | 0xFFFFFF;
+				hlPath.reset();
+				hlPath.addRoundRect(barX + 2, barY + 1, fillW - 4, 2, 1);
+				hlPath.fill(cachedGraphics, hlBrush);
+			}
+		}
+
+		//第4层：细边框（半透明白色，模拟玻璃边缘）
+		var borderAlpha = math.floor(alpha * 0.25);
+		borderPen.color = (borderAlpha << 24) | 0xFFFFFF;
+		borderPath.reset();
+		borderPath.addRoundRect(barX, barY, barW, barH, barRadius);
+		cachedGraphics.drawPath(borderPen, borderPath);
+
+		gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+	}
+
+	//不抢焦点方式显示窗口（SW_SHOWNOACTIVATE=4）
+	::User32.ShowWindow(barForm.hwnd, 4);
+	layeredWnd.redraw();
+
+	progressBar = {
+		form = barForm;
+		layered = layeredWnd;
+		graphics = cachedGraphics;
+		hdc = hdc;
+		hMemDc = hMemDc;
+		hMemBmp = hMemBmp;
+		hOldBmp = hOldBmp;
+		hwnd = hwnd;
+		screenW = screenW;
+		screenH = screenH;
+		bgBrush = bgBrush;
+		fillBrush = fillBrush;
+		hlBrush = hlBrush;
+		borderPen = borderPen;
+		bgPath = bgPath;
+		fillPath = fillPath;
+		hlPath = hlPath;
+		borderPath = borderPath;
+	};
+}
+
+var destroyProgressBar = function(){
+	if(!progressBar) return;
+	if(progressTimer){
+		win.clearInterval(progressTimer);
+		progressTimer = null;
+	}
+	if(timeoutCheckTimer){
+		win.clearInterval(timeoutCheckTimer);
+		timeoutCheckTimer = null;
+	}
+	//清空画布并更新分层窗口，消除残留
+	progressBar.graphics.clear(0x00000000);
+	gdi.updateLayeredWindow(progressBar.hwnd, progressBar.hMemDc, ::SIZE(progressBar.screenW, progressBar.screenH));
+	//释放资源
+	progressBar.bgBrush.delete();
+	progressBar.fillBrush.delete();
+	progressBar.hlBrush.delete();
+	progressBar.borderPen.delete();
+	progressBar.bgPath.delete();
+	progressBar.fillPath.delete();
+	progressBar.hlPath.delete();
+	progressBar.borderPath.delete();
+	progressBar.graphics.delete();
+	::SelectObject(progressBar.hMemDc, progressBar.hOldBmp);
+	::DeleteObject(progressBar.hMemBmp);
+	::DeleteDC(progressBar.hMemDc);
+	::ReleaseDC(progressBar.hwnd, progressBar.hdc);
+	progressBar.form.close();
+	progressBar = null;
+	progressState = "hidden";
+	progressAlpha = 0;
+}
+
+//===== 礼花动画 =====
+var startFirework = function(){
+	if(fireworkThreadHandle) return;
+	var fireworkPath = pluginDir + "keyword\firework.aardio";
+	fireworkThreadHandle = thread.create(
+		function(fireworkPath){
+			import win.ui;
+			import win.ui.layered;
+			import gdip.solidBrush;
+			import gdip.bitmap;
+			import gdip.graphics;
+			import gdi;
+			var fw = loadcodex(fireworkPath);
+			fw.run();
+		}, fireworkPath
+	);
+	//不阻塞UI线程等待，礼花在后台自行运行
+	//句柄保留用于停止时清理
+}
+
+//===== 彩蛋动作 =====
+var triggerAction = function(){
+	if(ACTION_TYPE == "external" && #ACTION_PATH > 0){
+		try{
+			process.execute(ACTION_PATH);
+		}
+		catch(e){
+			..io.print("keyword插件: 执行外部文件失败 - " + tostring(e));
+		}
+	}
+	else{
+		startFirework();
+	}
+}
+
+//进度条动画定时器（必须在其他函数之前声明）
+var startProgressAnimation = function(){
+	if(progressTimer){
+		win.clearInterval(progressTimer);
+		progressTimer = null;
+	}
+	progressTimer = win.setInterval(function(){
+		if(progressState == "showing"){
+			progressAlpha = math.min(255, progressAlpha + 25);
+			if(progressAlpha >= 255){
+				progressState = "active";
+			}
+			if(progressBar) progressBar.layered.redraw();
+		}
+		elseif(progressState == "fading"){
+			progressAlpha = math.max(0, progressAlpha - 30);
+			if(progressAlpha <= 0){
+				progressState = "hidden";
+				win.clearInterval(progressTimer);
+				progressTimer = null;
+				destroyProgressBar();
+				return;
+			}
+			if(progressBar) progressBar.layered.redraw();
+		}
+		elseif(progressState == "flashing"){
+			flashCount++;
+			if(flashCount % 2 == 1){
+				progressAlpha = 255;
+			} else {
+				progressAlpha = 80;
+			}
+			if(progressBar) progressBar.layered.redraw();
+			if(flashCount >= 8){
+				progressState = "done";
+				win.clearInterval(progressTimer);
+				progressTimer = null;
+				destroyProgressBar();
+				triggerAction();
+				return;
+			}
+		}
+		else{
+			win.clearInterval(progressTimer);
+			progressTimer = null;
+		}
+	}, 50);
+}
+
+//停止超时检测定时器
+var stopTimeoutCheck = function(){
+	if(timeoutCheckTimer){
+		win.clearInterval(timeoutCheckTimer);
+		timeoutCheckTimer = null;
+	}
+}
+
+//隐藏进度条（淡出）
+var hideProgress = function(){
+	if(progressState == "hidden" || progressState == "fading") return;
+	progressState = "fading";
+	stopTimeoutCheck();
+	startProgressAnimation();
+}
+
+//更新进度条（匹配成功后调用）
+var updateProgress = function(){
+	if(!progressBar) return;
+	progressBar.layered.redraw();
+}
+
+//启动超时检测定时器（主动检测，不依赖下次按键）
+var startTimeoutCheck = function(){
+	if(timeoutCheckTimer){
+		win.clearInterval(timeoutCheckTimer);
+		timeoutCheckTimer = null;
+	}
+	timeoutCheckTimer = win.setInterval(function(){
+		if(currentPos > 0 && lastMatchTime > 0){
+			var elapsed = time.tick() - lastMatchTime;
+			if(elapsed > TIMEOUT){
+				currentPos = 0;
+				lastMatchTime = 0;
+				hideProgress();
+			}
+		}
+	}, 200);
+}
+
+//显示进度条（淡入）
+var showProgress = function(){
+	if(progressState == "active" || progressState == "showing") return;
+	createProgressBar();
+	progressState = "showing";
+	progressAlpha = 0;
+	startProgressAnimation();
+	startTimeoutCheck();
+}
+
+//完成闪烁
+var flashProgress = function(){
+	progressState = "flashing";
+	flashCount = 0;
+	stopTimeoutCheck();
+	startProgressAnimation();
+}
+
+//===== 按键匹配 =====
+var onKeyDown = function(data){
+	if(!running) return;
+
+	var ch = vkToCharStr(data.vkcode);
+	if(!ch) return;
+
+	var kwLen = #KEYWORD;
+	if(kwLen == 0) return;
+
+	//超时检查（被动检查，作为主动定时器的补充）
+	if(currentPos > 0){
+		var elapsed = time.tick() - lastMatchTime;
+		if(elapsed > TIMEOUT){
+			currentPos = 0;
+			hideProgress();
+		}
+	}
+
+	//匹配当前字符
+	var expected = string.upper(string.sub(KEYWORD, currentPos + 1, currentPos + 1));
+	if(ch == expected){
+		currentPos++;
+		lastMatchTime = time.tick(); //用 time.tick() 统一时间源
+
+		if(currentPos == 1){
+			showProgress();
+		}
+		updateProgress();
+
+		if(currentPos >= kwLen){
+			currentPos = 0;
+			flashProgress();
+		}
+	}
+	else{
+		if(currentPos > 0){
+			currentPos = 0;
+			hideProgress();
+		}
+	}
+}
+
+//===== 插件实例 =====
+var instance = {};
+
+instance.start = function(){
+	if(running) return;
+	running = true;
+	var config = plugin.getConfig(pluginId);
+	if(config){
+		KEYWORD = config.keyword || DEFAULT_KEYWORD;
+		TIMEOUT = config.timeout || DEFAULT_TIMEOUT;
+		ACTION_TYPE = config.actionType || DEFAULT_ACTION_TYPE;
+		ACTION_PATH = config.actionPath || "";
+	}
+	currentPos = 0;
+	lastMatchTime = 0;
+
+	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, function(data){
+		onKeyDown(data);
+	});
+	plugin.reportStatus(pluginId, "运行中");
+};
+
+instance.stop = function(){
+	if(!running) return;
+	running = false;
+	plugin.unsubscribeAll(pluginId);
+	currentPos = 0;
+	stopTimeoutCheck();
+	destroyProgressBar();
+	//等待礼花线程结束（最多5秒），避免全屏窗口残留
+	if(fireworkThreadHandle){
+		thread.waitOne(fireworkThreadHandle, 5000);
+		raw.closeHandle(fireworkThreadHandle);
+		fireworkThreadHandle = null;
+	}
+	plugin.reportStatus(pluginId, "已停止");
+};
+
+instance.dispose = function(){
+	running = false;
+	stopTimeoutCheck();
+	destroyProgressBar();
+	plugin.unsubscribeAll(pluginId); //确保订阅清理与资源释放解耦
+};
+
+instance.showSettings = function(parentForm){
+	var settingsForm = win.form(text="神秘暗号 设置";right=380;bottom=260;parent=parentForm;border="dialog frame");
+	settingsForm.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
+	settingsForm.add(
+		staticKw={cls="static";text="暗号:";left=16;top=18;right=70;bottom=38;transparent=1};
+		editKw={cls="edit";text=KEYWORD;left=80;top=14;right=210;bottom=37;edge=1;password=1};
+		staticKwTip={cls="static";text="3~30字符,字母+符号";left=216;top=18;right=370;bottom=38;transparent=1};
+		staticTimeout={cls="static";text="超时间隔:";left=16;top=52;right=70;bottom=72;transparent=1};
+		editTimeout={cls="edit";text=tostring(TIMEOUT);left=80;top=48;right=150;bottom=71;edge=1};
+		staticTimeoutTip={cls="static";text="ms(200~5000)";left=156;top=52;right=260;bottom=72;transparent=1};
+		staticAction={cls="static";text="触发动作:";left=16;top=86;right=70;bottom=106;transparent=1};
+		cmbAction={cls="combobox";left=80;top=82;right=230;bottom=106;edge=1;items={"礼花动画";"执行文件"};mode="dropdownlist"};
+		staticPath={cls="static";text="文件路径:";left=16;top=120;right=70;bottom=140;transparent=1};
+		editPath={cls="edit";text=ACTION_PATH;left=80;top=116;right=310;bottom=139;edge=1};
+		btnBrowse={cls="button";text="...";left=316;top=114;right=350;bottom=140};
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=16;top=158;right=210;bottom=178;checked=plugin.getAutoStart(pluginId)};
+		btnReset={cls="button";text="重置";left=16;top=200;right=96;bottom=230};
+		btnOk={cls="button";text="确定";left=140;top=200;right=230;bottom=230};
+		btnCancel={cls="button";text="取消";left=240;top=200;right=330;bottom=230}
+	);
+
+	if(ACTION_TYPE == "external"){
+		settingsForm.cmbAction.selIndex = 2;
+		settingsForm.editPath.disabled = false;
+		settingsForm.btnBrowse.disabled = false;
+	}
+	else{
+		settingsForm.cmbAction.selIndex = 1;
+		settingsForm.editPath.disabled = true;
+		settingsForm.btnBrowse.disabled = true;
+	}
+
+	settingsForm.cmbAction.oncommand = function(id, event){
+		var sel = settingsForm.cmbAction.selIndex;
+		if(sel == 2){
+			settingsForm.editPath.disabled = false;
+			settingsForm.btnBrowse.disabled = false;
+		}
+		else{
+			settingsForm.editPath.disabled = true;
+			settingsForm.btnBrowse.disabled = true;
+		}
+	}
+
+	settingsForm.btnBrowse.oncommand = function(id, event){
+		var path = fsys.dlg.open("可执行文件|*.exe;*.bat;*.cmd;*.ps1;*.py|所有文件|*.*||", "选择执行文件", , ownerForm);
+		if(path) settingsForm.editPath.text = path;
+	}
+
+	settingsForm.btnReset.oncommand = function(id, event){
+		settingsForm.editKw.text = DEFAULT_KEYWORD;
+		settingsForm.editTimeout.text = tostring(DEFAULT_TIMEOUT);
+		settingsForm.cmbAction.selIndex = 1;
+		settingsForm.editPath.text = "";
+		settingsForm.editPath.disabled = true;
+		settingsForm.btnBrowse.disabled = true;
+		settingsForm.chkAutoStart.checked = true;
+	};
+
+	settingsForm.btnOk.oncommand = function(id, event){
+		var kw = string.trim(settingsForm.editKw.text);
+		if(!kw || #kw < 3 || #kw > 30){
+			settingsForm.editKw.text = KEYWORD;
+			return;
+		}
+		var valid = true;
+		for(i=1;#kw;1){
+			var code = string.byte(kw, i);
+			if(code < 0x21 || code > 0x7E){
+				valid = false;
+				break;
+			}
+		}
+		if(!valid){
+			settingsForm.editKw.text = KEYWORD;
+			return;
+		}
+
+		var timeout = tonumber(settingsForm.editTimeout.text);
+		if(!timeout || timeout < 200 || timeout > 5000){
+			settingsForm.editTimeout.text = tostring(TIMEOUT);
+			return;
+		}
+
+		var actionType = settingsForm.cmbAction.selIndex == 2 ? "external" : "firework";
+		var actionPath = settingsForm.editPath.text;
+
+		KEYWORD = kw;
+		TIMEOUT = timeout;
+		ACTION_TYPE = actionType;
+		ACTION_PATH = actionPath;
+
+		currentPos = 0;
+		stopTimeoutCheck();
+		destroyProgressBar();
+
+		plugin.saveConfig(pluginId, {
+			keyword = kw;
+			timeout = timeout;
+			actionType = actionType;
+			actionPath = actionPath;
+			autoStart = settingsForm.chkAutoStart.checked
+		});
+
+		settingsForm.close();
+	};
+
+	settingsForm.btnCancel.oncommand = function(id, event){
+		settingsForm.close();
+	};
+
+	settingsForm.doModal();
+};
+
+return instance;

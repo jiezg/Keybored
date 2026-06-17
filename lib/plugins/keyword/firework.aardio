@@ -1,0 +1,714 @@
+//firework 游戏通关庆祝动画模块
+//由 keyword 插件的动画线程通过 loadcodex 加载
+//提供 run() 函数，运行约5秒后自动退出
+import win.ui;
+import win.ui.layered;
+import gdip.solidBrush;
+import gdip.bitmap;
+import gdip.graphics;
+import gdip.path;
+import gdi;
+
+//颜色方案
+var colorSchemes = {
+	{0xFFFF1744, 0xFFFF6B6B, 0xFFFFAB91};  //红系
+	{0xFFF50057, 0xFFFF4081, 0xFFF8BBD0};  //粉系
+	{0xFFFFD600, 0xFFFFAB00, 0xFFFFF176};  //金系
+	{0xFF00E676, 0xFF69F0AE, 0xFFB9F6CA};  //绿系
+	{0xFF00B0FF, 0xFF40C4FF, 0xFF80D8FF};  //蓝系
+	{0xFF651FFF, 0xFFB388FF, 0xFFEA80FC};  //紫系
+	{0xFFFF6D00, 0xFFFFAB40, 0xFFFFD180};  //橙系
+	{0xFF18FFFF, 0xFF84FFFF, 0xFFFFFFFF};  //青系
+	{0xFFFFFFFF, 0xFFFFF176, 0xFFFFD600};  //白金系
+	{0xFFFF1744, 0xFFFFD600, 0xFF00E676};  //红金绿
+};
+
+//纸屑颜色（更鲜艳）
+var confettiColors = {
+	0xFFFF1744, 0xFFF50057, 0xFFFFD600, 0xFFFFAB00,
+	0xFF00E676, 0xFF00B0FF, 0xFF651FFF, 0xFFFF6D00,
+	0xFF18FFFF, 0xFFFFFFFF, 0xFFEA80FC, 0xFF69F0AE
+};
+
+run = function(){
+	var screenW, screenH = win.getScreen();
+	var scaleFactor = screenH / 1080;
+
+	//创建全屏透明分层窗口
+	var fwForm = win.form(
+		right = screenW;
+		bottom = screenH;
+		border = "none";
+		title = "";
+		topmost = true;
+		transparent = true;
+	);
+	fwForm.modifyStyleEx(0, 0x20);       //WS_EX_TRANSPARENT
+	fwForm.modifyStyleEx(0, 0x80);       //WS_EX_TOOLWINDOW
+	fwForm.modifyStyleEx(0x40000, 0);    //移除 WS_EX_APPWINDOW
+	fwForm.modifyStyleEx(0, 0x08000000); //WS_EX_NOACTIVATE 不抢焦点
+
+	var layeredWnd = win.ui.layered(fwForm, -1);
+
+	var hwnd = fwForm.hwnd;
+	var hdc = ::GetDC(hwnd);
+	var hMemDc = ::CreateCompatibleDC(hdc);
+	var hMemBmp = ::Gdi32.CreateDIBSectionP(hMemDc, {
+		INT cbSize = 40;
+		int cx = screenW;
+		int cy = -screenH;
+		WORD planes = 1;
+		WORD bitCount = 32;
+		INT compression;
+		INT size;
+		int xpm;
+		int ypm;
+		INT clrUsed;
+		INT clrImportant;
+	}, 0, {ptr v}, null, 0);
+	var hOldBmp = ::SelectObject(hMemDc, hMemBmp);
+	var cachedGraphics = gdip.graphics(hMemDc);
+	cachedGraphics.smoothingMode = 2;
+
+	//粒子数据
+	var particles = {};     //礼花爆炸粒子
+	var rockets = {};       //上升火箭
+	var confetti = {};      //纸屑
+	var streamers = {};     //彩带
+	var fountain = {};      //喷射粒子
+	var sparkles = {};      //闪光粒子
+
+	var GRAVITY = 0.12 * scaleFactor;
+	var startTime = time.tick();
+	var DURATION = 5000;
+	var TRAIL_LEN = 6; //粒子拖尾长度
+	var ROCKET_TRAIL_LEN = 8; //火箭拖尾长度
+
+	//缓存画刷
+	var cachedBrush = gdip.solidBrush(0xFFFFFFFF);
+	//预创建纸屑路径（复用，避免每帧创建/销毁）
+	var confettiPath = gdip.path(1);
+
+	//===== 火箭 =====
+	var launchRocket = function(targetX, targetY){
+		var startX = targetX + math.random(-30, 30) * scaleFactor;
+		var startY = screenH + 10;
+		var scheme = colorSchemes[math.random(1, #colorSchemes)];
+		table.push(rockets, {
+			x = startX;
+			y = startY;
+			targetX = targetX;
+			targetY = targetY;
+			vx = (targetX - startX) / 40;
+			vy = -(startY - targetY) / 40;
+			color = scheme[1];
+			scheme = scheme;
+			trail = {};
+			age = 0;
+			burstType = math.random(1, 4); //1=球形 2=柳叶 3=环形 4=双层
+		});
+	}
+
+	//火箭爆炸
+	var explodeRocket = function(rocket){
+		var cx = rocket.x;
+		var cy = rocket.y;
+		var scheme = rocket.scheme;
+		var burstType = rocket.burstType;
+
+		if(burstType == 1){
+			//球形爆炸：大量粒子向四周扩散
+			var count = math.random(100, 150);
+			for(i=1;count;1){
+				var angle = math.random() * math.pi * 2;
+				var speed = (1.5 + math.random() * 5.5) * scaleFactor;
+				var color = scheme[math.random(1, #scheme)];
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * speed;
+					vy = math.sin(angle) * speed;
+					color = color;
+					radius = (1 + math.random() * 2.5) * scaleFactor;
+					life = 1.0;
+					decay = 0.005 + math.random() * 0.005;
+					twinkle = math.random() < 0.3;
+					twinklePhase = math.random() * math.pi * 2;
+					trail = {};
+				});
+			}
+		}
+		elseif(burstType == 2){
+			//柳叶型：慢衰减长拖尾
+			var count = math.random(70, 100);
+			for(i=1;count;1){
+				var angle = math.random() * math.pi * 2;
+				var speed = (2 + math.random() * 3.5) * scaleFactor;
+				var color = scheme[math.random(1, #scheme)];
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * speed;
+					vy = math.sin(angle) * speed;
+					color = color;
+					radius = (1.5 + math.random() * 2) * scaleFactor;
+					life = 1.0;
+					decay = 0.003 + math.random() * 0.003;
+					twinkle = false;
+					twinklePhase = 0;
+					trail = {};
+				});
+			}
+		}
+		elseif(burstType == 3){
+			//环形
+			var count = math.random(60, 80);
+			var ringSpeed = (3 + math.random() * 2.5) * scaleFactor;
+			for(i=1;count;1){
+				var angle = (i / count) * math.pi * 2 + math.random() * 0.08;
+				var color = scheme[math.random(1, #scheme)];
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * ringSpeed;
+					vy = math.sin(angle) * ringSpeed;
+					color = color;
+					radius = (1.5 + math.random() * 1.5) * scaleFactor;
+					life = 1.0;
+					decay = 0.006 + math.random() * 0.004;
+					twinkle = math.random() < 0.4;
+					twinklePhase = math.random() * math.pi * 2;
+					trail = {};
+				});
+			}
+			//环心小粒子
+			for(i=1;20;1){
+				var angle = math.random() * math.pi * 2;
+				var speed = math.random() * 1.5 * scaleFactor;
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * speed;
+					vy = math.sin(angle) * speed;
+					color = scheme[1];
+					radius = 1 * scaleFactor;
+					life = 1.0;
+					decay = 0.01 + math.random() * 0.01;
+					twinkle = true;
+					twinklePhase = math.random() * math.pi * 2;
+					trail = {};
+				});
+			}
+		}
+		elseif(burstType == 4){
+			//双层爆炸：内层快外层慢
+			var innerCount = math.random(40, 60);
+			var outerCount = math.random(80, 120);
+			//内层
+			for(i=1;innerCount;1){
+				var angle = math.random() * math.pi * 2;
+				var speed = (1 + math.random() * 2) * scaleFactor;
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * speed;
+					vy = math.sin(angle) * speed;
+					color = scheme[1];
+					radius = (1.5 + math.random() * 1.5) * scaleFactor;
+					life = 1.0;
+					decay = 0.008 + math.random() * 0.005;
+					twinkle = true;
+					twinklePhase = math.random() * math.pi * 2;
+					trail = {};
+				});
+			}
+			//外层
+			for(i=1;outerCount;1){
+				var angle = math.random() * math.pi * 2;
+				var speed = (3.5 + math.random() * 4) * scaleFactor;
+				var color = scheme[math.random(2, #scheme)];
+				table.push(particles, {
+					x = cx; y = cy;
+					vx = math.cos(angle) * speed;
+					vy = math.sin(angle) * speed;
+					color = color;
+					radius = (1 + math.random() * 2) * scaleFactor;
+					life = 1.0;
+					decay = 0.005 + math.random() * 0.004;
+					twinkle = math.random() < 0.2;
+					twinklePhase = math.random() * math.pi * 2;
+					trail = {};
+				});
+			}
+		}
+	}
+
+	//===== 纸屑 =====
+	var spawnConfetti = function(count){
+		for(i=1;count;1){
+			var color = confettiColors[math.random(1, #confettiColors)];
+			table.push(confetti, {
+				x = math.random(0, screenW);
+				y = -math.random(10, 100) * scaleFactor;
+				vx = math.random(-1, 1) * scaleFactor;
+				vy = (1.5 + math.random() * 2) * scaleFactor;
+				color = color;
+				width = (4 + math.random() * 6) * scaleFactor;
+				height = (6 + math.random() * 10) * scaleFactor;
+				rotation = math.random() * math.pi * 2;
+				rotSpeed = (math.random() - 0.5) * 0.15;
+				wobble = math.random() * math.pi * 2; //左右摆动相位
+				wobbleSpeed = 0.03 + math.random() * 0.04;
+				life = 1.0;
+				decay = 0.001 + math.random() * 0.001;
+			});
+		}
+	}
+
+	//===== 彩带 =====
+	var spawnStreamers = function(count){
+		for(i=1;count;1){
+			var color = confettiColors[math.random(1, #confettiColors)];
+			var startX = math.random(math.floor(screenW * 0.1), math.floor(screenW * 0.9));
+			table.push(streamers, {
+				x = startX;
+				y = -math.random(10, 50) * scaleFactor;
+				vx = (math.random() - 0.5) * 0.5 * scaleFactor;
+				vy = (1 + math.random() * 1.5) * scaleFactor;
+				color = color;
+				length = (30 + math.random() * 50) * scaleFactor;
+				width = (2 + math.random() * 3) * scaleFactor;
+				phase = math.random() * math.pi * 2; //螺旋相位
+				phaseSpeed = 0.05 + math.random() * 0.05;
+				life = 1.0;
+				decay = 0.0015 + math.random() * 0.001;
+			});
+		}
+	}
+
+	//===== 喷射粒子 =====
+	var spawnFountain = function(count){
+		var cx = screenW / 2;
+		var cy = screenH;
+		for(i=1;count;1){
+			var angle = -math.pi / 2 + (math.random() - 0.5) * 1.2; //向上扇形
+			var speed = (5 + math.random() * 8) * scaleFactor;
+			var color = confettiColors[math.random(1, #confettiColors)];
+			table.push(fountain, {
+				x = cx + math.random(-20, 20) * scaleFactor;
+				y = cy;
+				vx = math.cos(angle) * speed;
+				vy = math.sin(angle) * speed;
+				color = color;
+				radius = (1.5 + math.random() * 2) * scaleFactor;
+				life = 1.0;
+				decay = 0.004 + math.random() * 0.004;
+				twinkle = math.random() < 0.3;
+				twinklePhase = math.random() * math.pi * 2;
+				trail = {};
+			});
+		}
+	}
+
+	//===== 闪光粒子 =====
+	var spawnSparkle = function(x, y){
+		var color = confettiColors[math.random(1, #confettiColors)];
+		table.push(sparkles, {
+			x = x;
+			y = y;
+			radius = (8 + math.random() * 15) * scaleFactor;
+			life = 1.0;
+			decay = 0.03 + math.random() * 0.02;
+			color = color;
+			phase = 0;
+		});
+	}
+
+	//初始发射3组火箭
+	for(i=1;3;1){
+		var tx = screenW * (0.2 + i * 0.3) + math.random(-50, 50) * scaleFactor;
+		var ty = screenH * (0.15 + math.random() * 0.2);
+		launchRocket(tx, ty);
+	}
+
+	//初始纸屑和彩带
+	spawnConfetti(40);
+	spawnStreamers(8);
+
+	//初始喷射
+	spawnFountain(30);
+
+	var frameCount = 0;
+
+	//覆盖 redraw：每帧清空画布，粒子自带拖尾
+	layeredWnd.redraw = function(){
+		//每帧完全清空画布（透明背景，无黑色累积）
+		cachedGraphics.clear(0x00000000);
+
+		//绘制火箭
+		for(i=1;#rockets;1){
+			var rk = rockets[i];
+			if(rk.age < 0) continue;
+
+			//火箭拖尾
+			for(j=1;#rk.trail;1){
+				var t = rk.trail[j];
+				var ta = math.floor(180 * (j / #rk.trail));
+				cachedBrush.color = (ta << 24) | (0xFFFFCC00 & 0xFFFFFF);
+				var tr = 1.5 * scaleFactor * (j / #rk.trail);
+				if(tr > 0.3) cachedGraphics.fillEllipse(cachedBrush, t.x - tr, t.y - tr, tr * 2, tr * 2);
+			}
+
+			//火箭本体
+			cachedBrush.color = 0xFF000000 | (rk.color & 0xFFFFFF);
+			var r = 2.5 * scaleFactor;
+			cachedGraphics.fillEllipse(cachedBrush, rk.x - r, rk.y - r, r * 2, r * 2);
+		}
+
+		//绘制礼花爆炸粒子（带拖尾）
+		for(i=1;#particles;1){
+			var p = particles[i];
+			if(p.life <= 0) continue;
+
+			//绘制拖尾
+			for(j=1;#p.trail;1){
+				var t = p.trail[j];
+				var trailAlpha = math.floor(120 * (j / #p.trail) * p.life);
+				if(trailAlpha <= 0) continue;
+				cachedBrush.color = (trailAlpha << 24) | (p.color & 0xFFFFFF);
+				var tr = p.radius * (j / #p.trail) * 0.6;
+				if(tr > 0.3) cachedGraphics.fillEllipse(cachedBrush, t.x - tr, t.y - tr, tr * 2, tr * 2);
+			}
+
+			//绘制粒子本体
+			var alpha = math.floor(255 * p.life);
+			if(p.twinkle){
+				var tw = math.sin(p.twinklePhase + frameCount * 0.3);
+				if(tw < 0) alpha = math.floor(alpha * 0.3);
+			}
+			if(alpha <= 0) continue;
+
+			cachedBrush.color = (alpha << 24) | (p.color & 0xFFFFFF);
+			var r = p.radius * math.max(0.3, p.life);
+			if(r < 0.3) continue;
+			cachedGraphics.fillEllipse(cachedBrush, p.x - r, p.y - r, r * 2, r * 2);
+		}
+
+		//绘制纸屑（旋转矩形，预创建路径复用避免每帧创建/销毁）
+		for(i=1;#confetti;1){
+			var c = confetti[i];
+			if(c.life <= 0) continue;
+			var alpha = math.floor(255 * c.life);
+			if(alpha <= 0) continue;
+
+			cachedBrush.color = (alpha << 24) | (c.color & 0xFFFFFF);
+			//用路径绘制旋转矩形（复用路径对象）
+			var cos_r = math.cos(c.rotation);
+			var sin_r = math.sin(c.rotation);
+			var hw = c.width / 2;
+			var hh = c.height / 2;
+			//矩形4个角旋转后的坐标
+			var x1 = -hw * cos_r - (-hh) * sin_r + c.x;
+			var y1 = -hw * sin_r + (-hh) * cos_r + c.y;
+			var x2 = hw * cos_r - (-hh) * sin_r + c.x;
+			var y2 = hw * sin_r + (-hh) * cos_r + c.y;
+			var x3 = hw * cos_r - hh * sin_r + c.x;
+			var y3 = hw * sin_r + hh * cos_r + c.y;
+			var x4 = -hw * cos_r - hh * sin_r + c.x;
+			var y4 = -hw * sin_r + hh * cos_r + c.y;
+
+			confettiPath.reset();
+			confettiPath.startFigure();
+			confettiPath.addLine(x1, y1, x2, y2);
+			confettiPath.addLine(x2, y2, x3, y3);
+			confettiPath.addLine(x3, y3, x4, y4);
+			confettiPath.closeFigure();
+			confettiPath.fill(cachedGraphics, cachedBrush);
+		}
+
+		//绘制彩带（波浪形长条，减少段数降低路径开销）
+		for(i=1;#streamers;1){
+			var s = streamers[i];
+			if(s.life <= 0) continue;
+			var alpha = math.floor(220 * s.life);
+			if(alpha <= 0) continue;
+
+			cachedBrush.color = (alpha << 24) | (s.color & 0xFFFFFF);
+			//绘制为多段连接的波浪形
+			var sp = gdip.path(1);
+			var segCount = 4; //减少段数
+			var halfW = s.width / 2;
+			//计算所有边缘点
+			var leftEdge = {};
+			var rightEdge = {};
+			for(k=0;segCount;1){
+				var ratio = k / segCount;
+				var sx = s.x + math.sin(s.phase + ratio * math.pi * 2) * 10 * scaleFactor;
+				var sy = s.y + ratio * s.length;
+				table.push(leftEdge, {x = sx - halfW; y = sy});
+				table.push(rightEdge, {x = sx + halfW; y = sy});
+			}
+			//构建路径：左边缘→底边→右边缘（反向）
+			sp.startFigure();
+			sp.addLine(leftEdge[1].x, leftEdge[1].y, leftEdge[2].x, leftEdge[2].y);
+			for(k=2;segCount;1){
+				sp.addLine(leftEdge[k].x, leftEdge[k].y, leftEdge[k+1].x, leftEdge[k+1].y);
+			}
+			sp.addLine(leftEdge[segCount+1].x, leftEdge[segCount+1].y, rightEdge[segCount+1].x, rightEdge[segCount+1].y);
+			for(k=segCount;1;-1){
+				sp.addLine(rightEdge[k+1].x, rightEdge[k+1].y, rightEdge[k].x, rightEdge[k].y);
+			}
+			sp.closeFigure();
+			sp.fill(cachedGraphics, cachedBrush);
+			sp.delete();
+		}
+
+		//绘制喷射粒子（带拖尾）
+		for(i=1;#fountain;1){
+			var f = fountain[i];
+			if(f.life <= 0) continue;
+
+			//拖尾
+			for(j=1;#f.trail;1){
+				var t = f.trail[j];
+				var trailAlpha = math.floor(100 * (j / #f.trail) * f.life);
+				if(trailAlpha <= 0) continue;
+				cachedBrush.color = (trailAlpha << 24) | (f.color & 0xFFFFFF);
+				var tr = f.radius * (j / #f.trail) * 0.5;
+				if(tr > 0.3) cachedGraphics.fillEllipse(cachedBrush, t.x - tr, t.y - tr, tr * 2, tr * 2);
+			}
+
+			//本体
+			var alpha = math.floor(255 * f.life);
+			if(f.twinkle){
+				var tw = math.sin(f.twinklePhase + frameCount * 0.3);
+				if(tw < 0) alpha = math.floor(alpha * 0.3);
+			}
+			if(alpha <= 0) continue;
+			cachedBrush.color = (alpha << 24) | (f.color & 0xFFFFFF);
+			var r = f.radius * math.max(0.3, f.life);
+			if(r < 0.3) continue;
+			cachedGraphics.fillEllipse(cachedBrush, f.x - r, f.y - r, r * 2, r * 2);
+		}
+
+		//绘制闪光粒子（十字星形）
+		for(i=1;#sparkles;1){
+			var sp = sparkles[i];
+			if(sp.life <= 0) continue;
+			var alpha = math.floor(255 * sp.life);
+			if(alpha <= 0) continue;
+
+			//闪光：中心亮圆 + 十字光芒
+			cachedBrush.color = (alpha << 24) | (sp.color & 0xFFFFFF);
+			var r = sp.radius * sp.life;
+			//中心圆
+			cachedGraphics.fillEllipse(cachedBrush, sp.x - r * 0.3, sp.y - r * 0.3, r * 0.6, r * 0.6);
+			//十字光芒（用细矩形模拟）
+			var glowAlpha = math.floor(alpha * 0.5);
+			cachedBrush.color = (glowAlpha << 24) | 0xFFFFFF;
+			var glowLen = r;
+			var glowW = r * 0.08;
+			if(glowW > 0.5){
+				//水平
+				var gp1 = gdip.path(1);
+				gp1.addRectangle(sp.x - glowLen, sp.y - glowW, glowLen * 2, glowW * 2);
+				gp1.fill(cachedGraphics, cachedBrush);
+				gp1.delete();
+				//垂直
+				var gp2 = gdip.path(1);
+				gp2.addRectangle(sp.x - glowW, sp.y - glowLen, glowW * 2, glowLen * 2);
+				gp2.fill(cachedGraphics, cachedBrush);
+				gp2.delete();
+			}
+		}
+
+		gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+	}
+
+	//不抢焦点方式显示窗口（SW_SHOWNOACTIVATE=4）
+	::User32.ShowWindow(hwnd, 4);
+	//先清空画布
+	cachedGraphics.clear(0x00000000);
+	gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+
+	//排除任务栏预览
+	var DwmApi = raw.loadDll("Dwmapi.dll");
+	var excludeFromPeek = { INT value = 1 };
+	DwmApi.DwmSetWindowAttribute(hwnd, 12, excludeFromPeek, 4);
+
+	//动画定时器
+	var timerId = null;
+	timerId = fwForm.setInterval(function(){
+		var elapsed = time.tick() - startTime;
+		frameCount++;
+
+		//持续发射火箭（前3.5秒）
+		if(elapsed < 3500){
+			if(frameCount % 20 == 0){
+				var tx = math.random(math.floor(screenW * 0.1), math.floor(screenW * 0.9));
+				var ty = math.random(math.floor(screenH * 0.1), math.floor(screenH * 0.35));
+				launchRocket(tx, ty);
+			}
+		}
+
+		//持续生成纸屑（前4秒）
+		if(elapsed < 4000){
+			if(frameCount % 8 == 0){
+				spawnConfetti(math.random(3, 6));
+			}
+		}
+
+		//持续生成彩带（前3秒）
+		if(elapsed < 3000){
+			if(frameCount % 30 == 0){
+				spawnStreamers(math.random(2, 4));
+			}
+		}
+
+		//持续喷射（前2.5秒）
+		if(elapsed < 2500){
+			if(frameCount % 4 == 0){
+				spawnFountain(math.random(2, 5));
+			}
+		}
+
+		//随机闪光（前4秒）
+		if(elapsed < 4000){
+			if(frameCount % 15 == 0){
+				var sx = math.random(math.floor(screenW * 0.1), math.floor(screenW * 0.9));
+				var sy = math.random(math.floor(screenH * 0.1), math.floor(screenH * 0.7));
+				spawnSparkle(sx, sy);
+			}
+		}
+
+		//更新火箭
+		var ri = 1;
+		while(ri <= #rockets){
+			var rk = rockets[ri];
+			if(rk.age < 0){ ri++; continue; }
+
+			//记录拖尾位置
+			table.push(rk.trail, {x = rk.x; y = rk.y});
+			if(#rk.trail > ROCKET_TRAIL_LEN) table.remove(rk.trail, 1);
+
+			rk.x = rk.x + rk.vx;
+			rk.y = rk.y + rk.vy;
+			rk.age++;
+
+			//到达目标高度，爆炸
+			if(rk.y <= rk.targetY){
+				explodeRocket(rk);
+				rockets[ri] = rockets[#rockets]; //swap-and-pop O(1)
+				table.pop(rockets);
+				continue;
+			}
+			ri++;
+		}
+
+		//更新礼花爆炸粒子
+		var pi = 1;
+		while(pi <= #particles){
+			var p = particles[pi];
+			//记录拖尾
+			table.push(p.trail, {x = p.x; y = p.y});
+			if(#p.trail > TRAIL_LEN) table.remove(p.trail, 1);
+
+			p.vy = p.vy + GRAVITY;
+			p.x = p.x + p.vx;
+			p.y = p.y + p.vy;
+			p.vx = p.vx * 0.985;
+			p.life = p.life - p.decay;
+			if(p.life <= 0){
+				particles[pi] = particles[#particles]; //swap-and-pop O(1)
+				table.pop(particles);
+				continue;
+			}
+			pi++;
+		}
+
+		//更新纸屑
+		var ci = 1;
+		while(ci <= #confetti){
+			var c = confetti[ci];
+			c.wobble = c.wobble + c.wobbleSpeed;
+			c.x = c.x + c.vx + math.sin(c.wobble) * 0.8 * scaleFactor;
+			c.y = c.y + c.vy;
+			c.rotation = c.rotation + c.rotSpeed;
+			c.life = c.life - c.decay;
+			//超出屏幕底部也移除
+			if(c.life <= 0 || c.y > screenH + 50){
+				confetti[ci] = confetti[#confetti]; //swap-and-pop O(1)
+				table.pop(confetti);
+				continue;
+			}
+			ci++;
+		}
+
+		//更新彩带
+		var si = 1;
+		while(si <= #streamers){
+			var s = streamers[si];
+			s.phase = s.phase + s.phaseSpeed;
+			s.x = s.x + s.vx + math.sin(s.phase) * 0.5 * scaleFactor;
+			s.y = s.y + s.vy;
+			s.life = s.life - s.decay;
+			if(s.life <= 0 || s.y > screenH + 100){
+				streamers[si] = streamers[#streamers]; //swap-and-pop O(1)
+				table.pop(streamers);
+				continue;
+			}
+			si++;
+		}
+
+		//更新喷射粒子
+		var fi = 1;
+		while(fi <= #fountain){
+			var f = fountain[fi];
+			//记录拖尾
+			table.push(f.trail, {x = f.x; y = f.y});
+			if(#f.trail > TRAIL_LEN) table.remove(f.trail, 1);
+
+			f.vy = f.vy + GRAVITY;
+			f.x = f.x + f.vx;
+			f.y = f.y + f.vy;
+			f.vx = f.vx * 0.99;
+			f.life = f.life - f.decay;
+			if(f.life <= 0 || f.y > screenH + 20){
+				fountain[fi] = fountain[#fountain]; //swap-and-pop O(1)
+				table.pop(fountain);
+				continue;
+			}
+			fi++;
+		}
+
+		//更新闪光
+		var ki = 1;
+		while(ki <= #sparkles){
+			var sp = sparkles[ki];
+			sp.life = sp.life - sp.decay;
+			sp.phase = sp.phase + 0.2;
+			if(sp.life <= 0){
+				sparkles[ki] = sparkles[#sparkles]; //swap-and-pop O(1)
+				table.pop(sparkles);
+				continue;
+			}
+			ki++;
+		}
+
+		layeredWnd.redraw();
+
+		//超时且无粒子后退出
+		if(elapsed > DURATION && #particles == 0 && #rockets == 0
+			&& #confetti == 0 && #streamers == 0 && #fountain == 0 && #sparkles == 0){
+			fwForm.clearInterval(timerId);
+			cachedBrush.delete();
+			confettiPath.delete();  //释放预创建的纸屑路径对象
+			cachedGraphics.delete();
+			::SelectObject(hMemDc, hOldBmp);
+			::DeleteObject(hMemBmp);
+			::DeleteDC(hMemDc);
+			::ReleaseDC(hwnd, hdc);
+			fwForm.close();
+			win.quitMessage();
+		}
+	}, 25); //40fps
+
+	win.loopMessage();
+}
+
+return { run = run };

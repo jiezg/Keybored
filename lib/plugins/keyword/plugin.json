@@ -1,0 +1,13 @@
+{
+    "actionPath":"",
+    "actionType":"firework",
+    "autoStart":true,
+    "description":"设置神秘暗号，连续输入触发彩蛋",
+    "entry":"main.aardio",
+    "hasSettings":true,
+    "id":"keyword",
+    "keyword":"keybored",
+    "name":"神秘暗号",
+    "timeout":1500,
+    "version":"1.0.0"
+}

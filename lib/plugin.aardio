@@ -27,6 +27,7 @@ getPluginDir = function(){
 //当前加载上下文（供插件入口读取）
 var _currentPluginId = null;
 var _currentOwnerForm = null;
+var _currentPluginConfig = null;
 
 //插件列表UI引用（由主程序设置）
 var _listviewRef = null;
@@ -46,13 +47,18 @@ onKeyEvent = function(kAct, vkcode, timeStamp){
 	//构建事件数据
 	var eventData = {vkcode=vkcode; timestamp=timeStamp};
 
-	//分发给订阅插件
+	//分发给订阅插件（每个回调独立try-catch，防止单个插件异常中断后续分发）
 	for(pluginId, plugin in registeredPlugins){
 		if(!plugin) continue;
 		var callbacks = plugin.subscribers[kAct];
 		if(!callbacks) continue;
 		for(j=1;#callbacks;1){
-			callbacks[j](eventData);
+			try{
+				callbacks[j](eventData);
+			}
+			catch(e){
+				..io.print("插件 " + tostring(pluginId) + " 回调异常: " + tostring(e));
+			}
 		}
 	}
 }
@@ -163,6 +169,7 @@ getCurrentContext = function(){
 	return {
 		pluginId = _currentPluginId;
 		ownerForm = _currentOwnerForm;
+		config = _currentPluginConfig;
 	};
 }
 
@@ -229,6 +236,7 @@ loadAll = function(ownerForm){
 			//设置加载上下文
 			_currentPluginId = config.id;
 			_currentOwnerForm = ownerForm;
+			_currentPluginConfig = config;
 
 			var pluginInstance = null;
 			try{
@@ -239,15 +247,23 @@ loadAll = function(ownerForm){
 			}
 
 			if(pluginInstance){
-				register(config.id, config, pluginInstance);
-				if(config.autoStart !== false) start(config.id);
+			register(config.id, config, pluginInstance);
+			if(config.autoStart !== false){
+				try{
+					start(config.id);
+				}
+				catch(e){
+					..io.print("插件启动失败: " + config.id + " - " + ..tostring(e));
+				}
 			}
-			else{
-				..io.print("插件入口返回空: " + config.id);
-			}
+		}
+		else{
+			..io.print("插件入口返回空: " + config.id);
+		}
 
 			_currentPluginId = null;
 			_currentOwnerForm = null;
+			_currentPluginConfig = null;
 		}, true
 	);
 
@@ -258,7 +274,7 @@ loadAll = function(ownerForm){
 saveConfig = function(pluginId, config){
 	var plugin = registeredPlugins[pluginId];
 	if(!plugin) return;
-	..table.mix(plugin.config, config);
+	..table.assign(plugin.config, config);
 	var configPath = getPluginDir() + pluginId + "\plugin.json";
 	var jsonText = ..web.json.stringify(plugin.config, true);
 	..string.save(configPath, jsonText);
@@ -274,6 +290,13 @@ getAutoStart = function(pluginId){
 	var plugin = registeredPlugins[pluginId];
 	if(!plugin) return true; // 默认自动启动
 	return plugin.config.autoStart !== false;
+};
+
+//获取插件配置（运行时读取，如需在插件入口读取请用 getCurrentContext().config）
+getConfig = function(pluginId){
+	var plugin = registeredPlugins[pluginId];
+	if(!plugin) return null;
+	return plugin.config;
 };
 
 //清理所有插件

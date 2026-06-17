@@ -5,10 +5,11 @@ import plugin;
 import win.ui;
 import thread.table;
 
-//获取加载上下文
+//获取加载上下文（含 config，从 plugin.json 读取）
 var ctx = plugin.getCurrentContext();
 var pluginId = ctx.pluginId;
 var ownerForm = ctx.ownerForm;
+var pluginConfig = ctx.config;
 
 //获取插件目录路径（动画线程内用 loadcodex 加载 shapeData）
 var pluginDir = plugin.getPluginDir();
@@ -28,8 +29,16 @@ var colorPool = {
 	0xFF5352ED, 0xFFA29BFE, 0xFFDFE6E9, 0xFFFFF200
 };
 
-var MAX_PARTICLES = 30;
+//默认参数值（重置按钮使用）
+var DEFAULT_MAX_PARTICLES = 30;
+var DEFAULT_RISE_SCALE = 1.0;
+var DEFAULT_FPS = 25;
+
+//从配置文件读取参数（首次加载由 plugin.json 提供，后续由 saveConfig 更新）
+var MAX_PARTICLES = pluginConfig.maxParticles || DEFAULT_MAX_PARTICLES;
 var EMITS_PER_TICK = 2;
+var FPS = pluginConfig.fps || DEFAULT_FPS;
+var RISE_SCALE = pluginConfig.riseScale || DEFAULT_RISE_SCALE;
 
 //初始化动画模块（启动独立动画线程）
 var init = function(ownerForm){
@@ -40,14 +49,14 @@ var init = function(ownerForm){
 	controlTable = thread.table("{B8E2F1A3-EMOJI-FX01-CTRL}");
 	controlTable.dispose = false;
 	controlTable.maxParticles = MAX_PARTICLES;
-	controlTable.riseScale = 1.0;
+	controlTable.riseScale = RISE_SCALE;
 
 	//获取 shapeData 文件路径，传入动画线程在线程内加载（函数引用无法跨线程序列化）
 	var shapeDataPath = pluginDir + "emojiFx\shapeData.aardio";
 
 	//启动动画线程，传递共享表和常量作为参数（子线程无法访问外部闭包上值）
 	animThreadHandle = thread.create(
-		function(emitQueue, controlTable, colorPool, maxParticles, emitsPerTick, shapeDataPath){
+		function(emitQueue, controlTable, colorPool, maxParticles, emitsPerTick, shapeDataPath, initialFps){
 			//在子线程中需要重新import所有依赖
 			import win.ui;
 			import win.ui.layered;
@@ -144,20 +153,21 @@ var init = function(ownerForm){
 			layeredWnd.redraw();
 
 			//排除任务栏预览
-			::DwmApi := raw.loadDll("Dwmapi.dll");
+			var DwmApi = raw.loadDll("Dwmapi.dll");
 			var excludeFromPeek = { INT value = 1 };
-			::DwmApi.DwmSetWindowAttribute(hwnd, 12/*_DWMWA_EXCLUDED_FROM_PEEK*/, excludeFromPeek, 4);
+			DwmApi.DwmSetWindowAttribute(hwnd, 12/*_DWMWA_EXCLUDED_FROM_PEEK*/, excludeFromPeek, 4);
 
-			//动画帧更新函数
+			//动画帧更新定时器（帧率由 initialFps 决定，变更帧率需重启插件）
 			var timerId = null;
 			timerId = fxForm.setInterval(function(){
 				//检查退出标志
 				if(controlTable.dispose){
-					fxForm.clearInterval(timerId);
-					timerId = null;
-					//清理渲染资源
-					cachedGraphics.delete();
-					::SelectObject(hMemDc, hOldBmp);
+				fxForm.clearInterval(timerId);
+				timerId = null;
+				//清理渲染资源
+				cachedGraphics.delete();
+				cachedGraphics = null; //置null避免重复释放
+				::SelectObject(hMemDc, hOldBmp);
 					::DeleteObject(hMemBmp);
 					::DeleteDC(hMemDc);
 					::ReleaseDC(hwnd, hdc);
@@ -217,7 +227,8 @@ var init = function(ownerForm){
 					var p = particles[i];
 					p.progress += p.speed;
 					if(p.progress >= 1){
-						table.remove(particles, i);
+						particles[i] = particles[#particles]; //swap-and-pop O(1)
+						table.pop(particles);
 						continue;
 					}
 					var t = p.progress;
@@ -229,7 +240,7 @@ var init = function(ownerForm){
 				}
 
 				layeredWnd.redraw();
-			}, 40); //40ms≈25fps，降低CPU占用
+			}, math.floor(1000 / initialFps));
 
 			//运行动画线程消息循环（阻塞，直到fxForm关闭）
 			win.loopMessage();
@@ -238,7 +249,7 @@ var init = function(ownerForm){
 			if(cachedGraphics){
 				cachedGraphics.delete();
 			}
-		}, emitQueue, controlTable, colorPool, MAX_PARTICLES, EMITS_PER_TICK, shapeDataPath
+		}, emitQueue, controlTable, colorPool, MAX_PARTICLES, EMITS_PER_TICK, shapeDataPath, FPS
 	);
 }
 
@@ -255,13 +266,23 @@ var getMaxParticles = function(){
 
 //设置上升高度倍率（通过共享表传递给动画线程，实时生效）
 var setRiseScale = function(s){
+	RISE_SCALE = s;
 	if(controlTable) controlTable.riseScale = s;
 }
 
 //获取上升高度倍率
 var getRiseScale = function(){
-	if(controlTable) return controlTable.riseScale : 1.0;
-	return 1.0;
+	return RISE_SCALE;
+}
+
+//设置帧率（保存到配置，重启插件后生效）
+var setFps = function(f){
+	FPS = f;
+}
+
+//获取帧率
+var getFps = function(){
+	return FPS;
 }
 
 //触发喷图（跨线程共享表，钩子回调零开销）
@@ -298,6 +319,13 @@ var instance = {};
 instance.start = function(){
 	if(running) return;
 	running = true;
+	//启动时重新从配置读取参数（设置保存后重启生效）
+	var config = plugin.getConfig(pluginId);
+	if(config){
+		MAX_PARTICLES = config.maxParticles || DEFAULT_MAX_PARTICLES;
+		RISE_SCALE = config.riseScale || DEFAULT_RISE_SCALE;
+		FPS = config.fps || DEFAULT_FPS;
+	}
 	//启动时订阅事件（必须在注册之后调用subscribe才有效）
 	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, function(data){
 		if(!running) return;
@@ -324,22 +352,39 @@ instance.stop = function(){
 instance.dispose = function(){
 	running = false;
 	dispose();
+	plugin.unsubscribeAll(pluginId); //确保订阅清理与资源释放解耦
 };
 
 instance.showSettings = function(parentForm){
-	//弹出喷图设置对话框
-	var settingsForm = win.form(text="按键喷图 设置";right=300;bottom=240;parent=parentForm;border="dialog window");
+	//弹出喷图设置对话框（禁止缩放和最大化）
+	var settingsForm = win.form(text="按键喷图 设置";right=340;bottom=240;parent=parentForm;border="dialog frame");
+	settingsForm.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
 	settingsForm.add(
-		staticMax={cls="static";text="最大粒子数:";left=10;top=20;right=100;bottom=40;transparent=1};
-		editMax={cls="edit";text=tostring(getMaxParticles());left=110;top=15;right=180;bottom=38;edge=1};
-		staticMaxTip={cls="static";text="(5~200)";left=185;top=20;right=260;bottom=40;transparent=1};
-		staticRise={cls="static";text="上升高度:";left=10;top=55;right=100;bottom=75;transparent=1};
-		editRise={cls="edit";text=tostring(getRiseScale());left=110;top=50;right=180;bottom=73;edge=1};
-		staticRiseTip={cls="static";text="倍率(0.5~3.0)";left=185;top=55;right=280;bottom=75;transparent=1};
-		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=90;right=200;bottom=110;checked=plugin.getAutoStart(pluginId)};
-		btnOk={cls="button";text="确定";left=60;top=150;right=150;bottom=180};
-		btnCancel={cls="button";text="取消";left=170;top=150;right=260;bottom=180};
+		//最大粒子数
+		staticMax={cls="static";text="最大粒子数:";left=16;top=18;right=110;bottom=38;transparent=1};
+		editMax={cls="edit";text=tostring(getMaxParticles());left=120;top=14;right=190;bottom=37;edge=1};
+		staticMaxTip={cls="static";text="(5~200)";left=196;top=18;right=260;bottom=38;transparent=1};
+		//上升高度
+		staticRise={cls="static";text="上升高度:";left=16;top=52;right=110;bottom=72;transparent=1};
+		editRise={cls="edit";text=tostring(getRiseScale());left=120;top=48;right=190;bottom=71;edge=1};
+		staticRiseTip={cls="static";text="倍率(0.5~3.0)";left=196;top=52;right=300;bottom=72;transparent=1};
+		//帧率
+		staticFps={cls="static";text="动画帧率:";left=16;top=86;right=110;bottom=106;transparent=1};
+		editFps={cls="edit";text=tostring(getFps());left=120;top=82;right=190;bottom=105;edge=1};
+		staticFpsTip={cls="static";text="FPS(25~60，重启插件生效)";left=196;top=86;right=350;bottom=106;transparent=1};
+		//自动启动
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=16;top=120;right=210;bottom=140;checked=plugin.getAutoStart(pluginId)};
+		//按钮
+		btnReset={cls="button";text="重置";left=16;top=168;right=96;bottom=198};
+		btnOk={cls="button";text="确定";left=120;top=168;right=210;bottom=198};
+		btnCancel={cls="button";text="取消";left=220;top=168;right=310;bottom=198}
 	);
+	settingsForm.btnReset.oncommand = function(id, event){
+		settingsForm.editMax.text = tostring(DEFAULT_MAX_PARTICLES);
+		settingsForm.editRise.text = tostring(DEFAULT_RISE_SCALE);
+		settingsForm.editFps.text = tostring(DEFAULT_FPS);
+		settingsForm.chkAutoStart.checked = true;
+	};
 	settingsForm.btnOk.oncommand = function(id, event){
 		//验证并应用最大粒子数
 		var maxP = tonumber(settingsForm.editMax.text);
@@ -357,8 +402,22 @@ instance.showSettings = function(parentForm){
 		}
 		setRiseScale(riseS);
 
-		//保存自动启动设置
-		plugin.setAutoStart(pluginId, settingsForm.chkAutoStart.checked);
+		//验证并应用帧率
+		var fps = tonumber(settingsForm.editFps.text);
+		if(!fps || fps < 25 || fps > 60){
+			settingsForm.editFps.text = tostring(getFps());
+			return;
+		}
+		setFps(fps);
+
+		//持久化保存所有设置到 plugin.json
+		plugin.saveConfig(pluginId, {
+			maxParticles = maxP;
+			riseScale = riseS;
+			fps = fps;
+			autoStart = settingsForm.chkAutoStart.checked
+		});
+
 		settingsForm.close();
 	};
 	settingsForm.btnCancel.oncommand = function(id, event){

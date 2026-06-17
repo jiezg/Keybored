@@ -147,10 +147,12 @@ instance.dispose = function(){
 
 instance.showSettings = function(parentForm){
 	//弹出键纹分析设置对话框
-	var dlg = win.form(text="键纹分析 设置";right=400;bottom=540;parent=parentForm;border="dialog window");
+	var dlg = win.form(text="键纹分析 设置";right=400;bottom=540;parent=parentForm;border="dialog frame");
+	dlg.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
 	dlg.add(
 		tabSettings={cls="tab";left=10;top=10;right=390;bottom=490;edge=1};
 		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=495;right=200;bottom=515;checked=plugin.getAutoStart(pluginId)};
+		btnReset={cls="button";text="重置";left=280;top=495;right=370;bottom=515};
 	);
 
 	//训练tab
@@ -334,6 +336,10 @@ instance.showSettings = function(parentForm){
 		tabInfer.btnStartInfer.disabled = false;
 		tabInfer.btnStopInfer.disabled = true;
 		tabInfer.staticInferStatus.text = "状态: 已停止";
+	};
+
+	dlg.btnReset.oncommand = function(id, event){
+		dlg.chkAutoStart.checked = true;
 	};
 
 	dlg.onClose = function(){

@@ -43,7 +43,7 @@ import win.ui;
      showSettings(parentForm) - 显示设置对话框（hasSettings为true时必须实现）
 
 4. plugin 模块提供的 API：
-   plugin.getCurrentContext()              - 获取加载上下文 {pluginId, ownerForm}
+   plugin.getCurrentContext()              - 获取加载上下文 {pluginId, ownerForm, config}
    plugin.getPluginDir()                   - 获取插件目录路径
    plugin.subscribe(id, event, callback)   - 订阅事件
    plugin.unsubscribeAll(id)               - 取消所有订阅
@@ -51,6 +51,7 @@ import win.ui;
    plugin.getAutoStart(id)                 - 获取自动启动设置
    plugin.setAutoStart(id, enabled)        - 设置自动启动
    plugin.saveConfig(id, configTable)      - 保存配置到 plugin.json
+   plugin.getConfig(id)                    - 获取插件配置（运行时读取）
 
 5. 事件类型（plugin.events）：
    KEY_DOWN   = 1  按键按下
@@ -69,12 +70,21 @@ import win.ui;
    - 子线程无法访问外部闭包变量，需通过 thread.create 参数传递
    - 函数引用无法跨线程序列化，传递文件路径字符串代替
    - 插件可能用到的库需在主程序 main.aardio 中以注释 import 预声明（//import xxx）
+   - 已预声明的库：win.ui.layered, gdip.path, gdip.solidBrush, gdip.bitmap, gdip.graphics,
+     thread.table, fsys, web.json, gdi, process, key
+
+8. 性能建议：
+   - 钩子回调中应尽量轻量，耗时操作用 thread.table 异步传递到工作线程
+   - 常驻动画（如喷图）使用独立线程 + 分层窗口
+   - 短暂特效（如进度条）可在主线程用分层窗口实现，避免线程开销
+   - 多个插件同时运行时各自线程独立，互不影响
 */
 
 //===== 获取加载上下文（每个插件必须调用）=====
 var ctx = plugin.getCurrentContext();
 var pluginId = ctx.pluginId;       //插件ID，来自 plugin.json 的 id 字段
 var ownerForm = ctx.ownerForm;     //主程序窗口，可作为对话框的 parent
+var pluginConfig = ctx.config;     //插件配置，来自 plugin.json 的完整内容
 
 //获取插件目录路径（用于加载同目录下的其他资源文件）
 var pluginDir = plugin.getPluginDir();
@@ -149,16 +159,20 @@ instance.dispose = function(){
 instance.showSettings = function(parentForm){
 	var settingsForm = win.form(
 		text="示范插件 设置";
-		right=300;
+		right=360;
 		bottom=150;
 		parent=parentForm;
-		border="dialog window"
+		border="dialog frame"
 	);
 	settingsForm.add(
 		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=10;right=200;bottom=30;checked=plugin.getAutoStart(pluginId)};
-		btnOk={cls="button";text="确定";left=60;top=60;right=150;bottom=90};
-		btnCancel={cls="button";text="取消";left=170;top=60;right=260;bottom=90};
+		btnReset={cls="button";text="重置";left=16;top=60;right=96;bottom=90};
+		btnOk={cls="button";text="确定";left=120;top=60;right=210;bottom=90};
+		btnCancel={cls="button";text="取消";left=220;top=60;right=310;bottom=90};
 	);
+	settingsForm.btnReset.oncommand = function(id, event){
+		settingsForm.chkAutoStart.checked = true;
+	};
 	settingsForm.btnOk.oncommand = function(id, event){
 		//保存自动启动设置到 plugin.json
 		plugin.setAutoStart(pluginId, settingsForm.chkAutoStart.checked);

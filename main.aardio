@@ -3,6 +3,7 @@ import win.ui;
 //console.open();
 import win.ui.menu;
 import win.ui.ctrl.vlist
+//import win.ui.ctrl.combobox;
 import thread.command;
 import plugin;
 
@@ -10,12 +11,16 @@ import plugin;
 //import win.ui.layered;
 //import gdip.path;
 //import gdip.solidBrush;
+//import gdip.pen;
 //import gdip.bitmap;
 //import gdip.graphics;
 //import thread.table;
 //import fsys;
+//import fsys.dlg;
 //import web.json;
 //import gdi;
+//import process;
+//import key;
 /*DSG{{*/
 mainForm = win.form(text="Keybored - 盘键盘";right=400;bottom=550;max=false)
 mainForm.add(
@@ -62,6 +67,7 @@ frmTabStatistics.listview.onGetDispItem = lambda(item,row,col){text=tabKeysStati
 
 //UI刷新节流：标记脏数据，由定时器批量刷新，避免每次按键都刷新UI阻塞钩子
 var uiDirty = false;
+var needSortStatistics = false; //提前声明，供 listener.$log 和低频定时器使用
 win.setInterval(function(){
 	if(!uiDirty) return;
 	uiDirty = false;
@@ -107,14 +113,9 @@ listener.$log = function(kAct,vkcode,timeStamp){
  		if(!flagFound){
  			table.push(tabKeysStatistics,{"键名"=keyName,"键码"=keyCode,"抖动次数"=1,"上一次"=keyTimestamp,"连击间隔"=math.floor(timeDelta)}) 
  		}
- 		//统计表上限控制，超出时移除抖动次数最少的条目
+ 		//统计表上限控制：仅标记，由低频定时器统一排序和裁剪
  		if(#tabKeysStatistics > 500){
- 			table.sort(tabKeysStatistics,function(v){
- 				return owner["抖动次数"] > v["抖动次数"];
- 			});
- 			for(i=#tabKeysStatistics;501;-1){
- 				table.remove(tabKeysStatistics, i);
- 			}
+ 			needSortStatistics = true;
  		}
  		needSortStatistics = true;//标记需要排序，由定时器统一处理
 	}
@@ -136,7 +137,7 @@ var intChattering = 100;//抖动阈值
 mainForm.btnGear.oncommand = function(id, event){
 	var popmenu = win.ui.popmenu(mainForm);
 	popmenu.add("连击阈值设置...", function(id){
-		var inputForm = ..win.form(text="连击阈值设置";right=250;bottom=100;parent=mainForm;border="dialog window");
+		var inputForm = ..win.form(text="连击阈值设置";right=250;bottom=100;parent=mainForm;border="dialog frame");
 		inputForm.add(
 			static={cls="static";text="阈值(ms):";left=10;top=15;right=80;bottom=35;transparent=1};
 			editInput={cls="edit";text=tostring(intChattering);left=90;top=10;right=160;bottom=33;edge=1};
@@ -155,6 +156,30 @@ mainForm.btnGear.oncommand = function(id, event){
 		inputForm.doModal();
 	});
 	popmenu.add("日志条目: " + tostring(#tabKeysLog));
+	popmenu.add();//分隔线
+	popmenu.add("关于 Keybored", function(id){
+		var aboutForm = ..win.form(text="关于 Keybored";right=300;bottom=240;parent=mainForm;border="dialog frame");
+		aboutForm.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
+		aboutForm.add(
+			picturebox={cls="picturebox";left=110;top=15;right=190;bottom=95;center=1;image="/res/ico.ico";z=1};
+			staticVersion={cls="static";text="Keybored v1.2.0";left=50;top=105;right=250;bottom=125;align="center";transparent=1;font={LOGFONT(name='微软雅黑';h=-14;weight=700)};z=2};
+			staticLink={cls="static";text="https://github.com/jiezg/keybored";left=30;top=135;right=270;bottom=155;align="center";transparent=1;font={LOGFONT(name='微软雅黑';h=-12;weight=400;color=16711680)};notify=1;z=3};
+			btnOk={cls="button";text="确定";left=110;top=175;right=190;bottom=200;z=4};
+		);
+		//链接点击：打开浏览器
+		aboutForm.staticLink.wndproc = function(hwnd, message, wParam, lParam){
+			if(message == 0x202/*_WM_LBUTTONUP*/){
+				process.execute("https://github.com/jiezg/keybored");
+			}
+			elseif(message == 0x200/*_WM_MOUSEMOVE*/){
+				aboutForm.staticLink.font = {LOGFONT(name='微软雅黑';h=-12;weight=400;color=16711680;fUnderline=1)};
+			}
+		};
+		aboutForm.btnOk.oncommand = function(id, event){
+			aboutForm.close();
+		};
+		aboutForm.doModal();
+	});
 	popmenu.popup();
 	popmenu.close();
 };
@@ -167,29 +192,33 @@ frmTabLog.listview.onnotify = function(id,code,ptr){
 		elseif( lvcd.nmcd.dwDrawStage == 1/*_CDDS_PREPAINT*/ ){
 			return 0x20/*_CDRF_NOTIFYITEMDRAW*/;
 		}
-		elseif( lvcd.nmcd.dwDrawStage == ( 0x10001/*_CDDS_ITEMPREPAINT*/ | 0x20000/*_CDDS_SUBITEM*/) ){ 
+		elseif( lvcd.nmcd.dwDrawStage == ( 0x10001/*_CDDS_ITEMPREPAINT*/ | 0x20000/*_CDDS_SUBITEM*/) ){
 			//注意这里 iSubItem 的索引自0开始( 其他函数通常自1开始 )
-			if(frmTabLog.listview.getItemText(lvcd.nmcd.dwItemSpec+1, 1/*lvcd.iSubItem+1*/)=="屏蔽"){
+			//缓存当前行操作类型，避免重复调用getItemText
+			var actionText = frmTabLog.listview.getItemText(lvcd.nmcd.dwItemSpec+1, 1);
+			if(actionText=="屏蔽"){
 				lvcd.clrText = gdi.RGB(255,0,0);
-				//lvcd.clrTextBk = lvcd.iSubItem % 2 ? gdi.RGB(0,12,223) : gdi.RGB(128,23,0);
 				lvcd.update();
 			}
-			elseif(frmTabLog.listview.getItemText(lvcd.nmcd.dwItemSpec+1, 1/*lvcd.iSubItem+1*/)=="长按*"){
+			elseif(actionText=="长按*"){
 				lvcd.clrText = gdi.RGB(0,0,255);
 				lvcd.update();
-			}			
+			}
 			return 0/*_CDRF_DODEFAULT*/
 		}
 	}
 }
 
 //统计表低频排序定时器
-var needSortStatistics = false;
 win.setInterval(function(){
 	if(needSortStatistics){
 		table.sort(tabKeysStatistics,function(v){
 			return owner["抖动次数"] > v["抖动次数"];
 		});
+		//裁剪超限条目
+		while(#tabKeysStatistics > 500){
+			table.pop(tabKeysStatistics);
+		}
 		frmTabStatistics.listview.count = #tabKeysStatistics;
 		needSortStatistics = false;
 	}
@@ -210,6 +239,7 @@ win.setInterval(function(){
 //钩子健康检测与自动恢复机制（参考 key.hotkey 实现）
 hook.$hookHealth = true;
 hook.healthCheckInterval = 30 * 1000;//30秒检查一次
+hook.$probeSent = false;//是否已发送探测按键待确认
 
 hook.setHealthCheckTimer = function(enabled){
 	if(hook.$healthCheckTimer){
@@ -222,20 +252,23 @@ hook.setHealthCheckTimer = function(enabled){
 		function(){
 			if(hook.$hookHealth){
 				hook.$hookHealth = null;//重置标记，等待下次按键确认
+				hook.$probeSent = false;//重置探测标记
 			}
 			else{
-				if(win.getIdleTime() < hook.healthCheckInterval){
-					//系统非空闲但钩子未收到消息，发送测试按键探测
-					::User32.keybd_event(0xFF/*_VK_NONE*/,0,2/*_KEYEVENTF_KEYUP*/ | 8, 0);
-					for(i=1;10;1){
-						thread.delay(20);
-						if(hook.$hookHealth) return;
-					}
-					//钩子已失效，重新安装
+				if(hook.$probeSent){
+					//上一轮已发送探测按键但未收到回调，钩子已失效
 					hook.reinstall();
+					hook.$probeSent = false;
 				}
 				else{
-					hook.$hookHealth = true;//系统空闲，正常
+					if(win.getIdleTime() < hook.healthCheckInterval){
+						//系统非空闲但钩子未收到消息，发送测试按键探测（非阻塞）
+						::User32.keybd_event(0xFF/*_VK_NONE*/,0,2/*_KEYEVENTF_KEYUP*/ | 8, 0);
+						hook.$probeSent = true;//标记已发送，下次回调检查结果
+					}
+					else{
+						hook.$hookHealth = true;//系统空闲，正常
+					}
 				}
 			}
 		},hook.healthCheckInterval
@@ -259,6 +292,7 @@ hook.reinstall = function(){
 	newHook.setHealthCheckTimer = hook.setHealthCheckTimer;
 	newHook.reinstall = hook.reinstall;
 	newHook.$healthCheckTimer = null;
+	newHook.$probeSent = false;
 	//替换hook引用（闭包通过upvalue引用，赋值后所有闭包可见新对象）
 	hook = newHook;
 	hook.setHealthCheckTimer(true);
