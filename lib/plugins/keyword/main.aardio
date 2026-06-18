@@ -247,7 +247,15 @@ var destroyProgressBar = function(){
 
 //===== 礼花动画 =====
 var startFirework = function(){
-	if(fireworkThreadHandle) return;
+	//检查上一次礼花线程是否已结束，已结束则清理句柄允许重新触发
+	if(fireworkThreadHandle){
+		if(thread.stillActive(fireworkThreadHandle)){
+			return; //线程仍在运行，不重复触发
+		}
+		//线程已结束，关闭句柄并重置
+		raw.closeHandle(fireworkThreadHandle);
+		fireworkThreadHandle = null;
+	}
 	var fireworkPath = pluginDir + "keyword\firework.aardio";
 	fireworkThreadHandle = thread.create(
 		function(fireworkPath){

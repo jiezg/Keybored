@@ -68,7 +68,7 @@ run = function(){
 	}, 0, {ptr v}, null, 0);
 	var hOldBmp = ::SelectObject(hMemDc, hMemBmp);
 	var cachedGraphics = gdip.graphics(hMemDc);
-	cachedGraphics.smoothingMode = 2;
+	cachedGraphics.smoothingMode = 4;  //HighSpeed，礼花粒子小且多，优先帧率
 
 	//粒子数据
 	var particles = {};     //礼花爆炸粒子
@@ -86,8 +86,8 @@ run = function(){
 
 	//缓存画刷
 	var cachedBrush = gdip.solidBrush(0xFFFFFFFF);
-	//预创建纸屑路径（复用，避免每帧创建/销毁）
-	var confettiPath = gdip.path(1);
+	//预创建彩带路径（复用，避免每帧创建/销毁）
+	var streamerPath = gdip.path(1);
 
 	//===== 火箭 =====
 	var launchRocket = function(targetX, targetY){
@@ -389,36 +389,19 @@ run = function(){
 			cachedGraphics.fillEllipse(cachedBrush, p.x - r, p.y - r, r * 2, r * 2);
 		}
 
-		//绘制纸屑（旋转矩形，预创建路径复用避免每帧创建/销毁）
+		//绘制纸屑（旋转矩形，用 GDI+ transform 矩阵，比手算坐标+路径更高效）
 		for(i=1;#confetti;1){
 			var c = confetti[i];
 			if(c.life <= 0) continue;
 			var alpha = math.floor(255 * c.life);
 			if(alpha <= 0) continue;
-
 			cachedBrush.color = (alpha << 24) | (c.color & 0xFFFFFF);
-			//用路径绘制旋转矩形（复用路径对象）
-			var cos_r = math.cos(c.rotation);
-			var sin_r = math.sin(c.rotation);
-			var hw = c.width / 2;
-			var hh = c.height / 2;
-			//矩形4个角旋转后的坐标
-			var x1 = -hw * cos_r - (-hh) * sin_r + c.x;
-			var y1 = -hw * sin_r + (-hh) * cos_r + c.y;
-			var x2 = hw * cos_r - (-hh) * sin_r + c.x;
-			var y2 = hw * sin_r + (-hh) * cos_r + c.y;
-			var x3 = hw * cos_r - hh * sin_r + c.x;
-			var y3 = hw * sin_r + hh * cos_r + c.y;
-			var x4 = -hw * cos_r - hh * sin_r + c.x;
-			var y4 = -hw * sin_r + hh * cos_r + c.y;
-
-			confettiPath.reset();
-			confettiPath.startFigure();
-			confettiPath.addLine(x1, y1, x2, y2);
-			confettiPath.addLine(x2, y2, x3, y3);
-			confettiPath.addLine(x3, y3, x4, y4);
-			confettiPath.closeFigure();
-			confettiPath.fill(cachedGraphics, cachedBrush);
+			cachedGraphics.saveTransform();
+			cachedGraphics.translate(c.x, c.y);
+			cachedGraphics.rotate(c.rotation);
+			//fillRectangle 以原点为中心绘制，宽高为 c.width × c.height
+			cachedGraphics.fillRectangle(cachedBrush, -c.width/2, -c.height/2, c.width, c.height);
+			cachedGraphics.restoreTransform();
 		}
 
 		//绘制彩带（波浪形长条，减少段数降低路径开销）
@@ -429,34 +412,34 @@ run = function(){
 			if(alpha <= 0) continue;
 
 			cachedBrush.color = (alpha << 24) | (s.color & 0xFFFFFF);
-			//绘制为多段连接的波浪形
-			var sp = gdip.path(1);
-			var segCount = 4; //减少段数
-			var halfW = s.width / 2;
-			//计算所有边缘点
-			var leftEdge = {};
-			var rightEdge = {};
-			for(k=0;segCount;1){
-				var ratio = k / segCount;
-				var sx = s.x + math.sin(s.phase + ratio * math.pi * 2) * 10 * scaleFactor;
-				var sy = s.y + ratio * s.length;
-				table.push(leftEdge, {x = sx - halfW; y = sy});
-				table.push(rightEdge, {x = sx + halfW; y = sy});
-			}
-			//构建路径：左边缘→底边→右边缘（反向）
-			sp.startFigure();
-			sp.addLine(leftEdge[1].x, leftEdge[1].y, leftEdge[2].x, leftEdge[2].y);
-			for(k=2;segCount;1){
-				sp.addLine(leftEdge[k].x, leftEdge[k].y, leftEdge[k+1].x, leftEdge[k+1].y);
-			}
-			sp.addLine(leftEdge[segCount+1].x, leftEdge[segCount+1].y, rightEdge[segCount+1].x, rightEdge[segCount+1].y);
-			for(k=segCount;1;-1){
-				sp.addLine(rightEdge[k+1].x, rightEdge[k+1].y, rightEdge[k].x, rightEdge[k].y);
-			}
-			sp.closeFigure();
-			sp.fill(cachedGraphics, cachedBrush);
-			sp.delete();
+		//绘制为多段连接的波浪形（复用预创建的 streamerPath）
+		var sp = streamerPath;
+		sp.reset();
+		var segCount = 4; //减少段数
+		var halfW = s.width / 2;
+		//计算所有边缘点
+		var leftEdge = {};
+		var rightEdge = {};
+		for(k=0;segCount;1){
+			var ratio = k / segCount;
+			var sx = s.x + math.sin(s.phase + ratio * math.pi * 2) * 10 * scaleFactor;
+			var sy = s.y + ratio * s.length;
+			table.push(leftEdge, {x = sx - halfW; y = sy});
+			table.push(rightEdge, {x = sx + halfW; y = sy});
 		}
+		//构建路径：左边缘→底边→右边缘（反向）
+		sp.startFigure();
+		sp.addLine(leftEdge[1].x, leftEdge[1].y, leftEdge[2].x, leftEdge[2].y);
+		for(k=2;segCount;1){
+			sp.addLine(leftEdge[k].x, leftEdge[k].y, leftEdge[k+1].x, leftEdge[k+1].y);
+		}
+		sp.addLine(leftEdge[segCount+1].x, leftEdge[segCount+1].y, rightEdge[segCount+1].x, rightEdge[segCount+1].y);
+		for(k=segCount;1;-1){
+			sp.addLine(rightEdge[k+1].x, rightEdge[k+1].y, rightEdge[k].x, rightEdge[k].y);
+		}
+		sp.closeFigure();
+		sp.fill(cachedGraphics, cachedBrush);
+	}
 
 		//绘制喷射粒子（带拖尾）
 		for(i=1;#fountain;1){
@@ -697,7 +680,7 @@ run = function(){
 			&& #confetti == 0 && #streamers == 0 && #fountain == 0 && #sparkles == 0){
 			fwForm.clearInterval(timerId);
 			cachedBrush.delete();
-			confettiPath.delete();  //释放预创建的纸屑路径对象
+			streamerPath.delete();  //释放预创建的彩带路径对象
 			cachedGraphics.delete();
 			::SelectObject(hMemDc, hOldBmp);
 			::DeleteObject(hMemBmp);

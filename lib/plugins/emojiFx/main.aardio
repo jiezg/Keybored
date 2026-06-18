@@ -42,7 +42,24 @@ var RISE_SCALE = pluginConfig.riseScale || DEFAULT_RISE_SCALE;
 
 //初始化动画模块（启动独立动画线程）
 var init = function(ownerForm){
-	if(animThreadHandle) return;
+	//检查动画线程是否已意外退出，已退出则清理句柄允许重新启动
+	if(animThreadHandle){
+		if(thread.stillActive(animThreadHandle)){
+			return; //线程仍在运行，不重复启动
+		}
+		//线程已结束，关闭句柄并重置
+		raw.closeHandle(animThreadHandle);
+		animThreadHandle = null;
+		//清理可能残留的共享表（避免新旧线程通信冲突）
+		if(emitQueue){
+			emitQueue.release();
+			emitQueue = null;
+		}
+		if(controlTable){
+			controlTable.release();
+			controlTable = null;
+		}
+	}
 
 	//创建跨线程通信共享表
 	emitQueue = thread.table("{B8E2F1A3-EMOJI-FX01-QUEUE}");
@@ -181,6 +198,8 @@ var init = function(ownerForm){
 				}
 
 				//动态读取参数（设置页可实时修改）
+			//业务逻辑用 try-catch 隔离，防止单帧异常导致线程退出
+			try{
 				if(controlTable.maxParticles) maxParticles = controlTable.maxParticles;
 				var riseScale = controlTable.riseScale ? controlTable.riseScale : 1.0;
 
@@ -240,7 +259,12 @@ var init = function(ownerForm){
 				}
 
 				layeredWnd.redraw();
-			}, math.floor(1000 / initialFps));
+			}
+			catch(e){
+				//异常时清空粒子重置状态，下一帧继续
+				particles = {};
+			}
+		}, math.floor(1000 / initialFps));
 
 			//运行动画线程消息循环（阻塞，直到fxForm关闭）
 			win.loopMessage();

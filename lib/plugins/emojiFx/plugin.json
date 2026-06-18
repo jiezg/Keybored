@@ -2,10 +2,10 @@
     "autoStart":true,
     "description":"按键时从屏幕右下角喷出矢量图形动画",
     "entry":"main.aardio",
-    "fps":60,
+    "fps":59,
     "hasSettings":true,
     "id":"emojiFx",
-    "maxParticles":200,
+    "maxParticles":190,
     "name":"按键喷图",
     "riseScale":1.6,
     "version":"1.0.0"

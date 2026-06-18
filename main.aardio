@@ -2,9 +2,10 @@ import win.ui;
 //import console;
 //console.open();
 import win.ui.menu;
-import win.ui.ctrl.vlist
+import win.ui.ctrl.vlistview
 //import win.ui.ctrl.combobox;
 import thread.command;
+import process;
 import plugin;
 
 //预声明插件可能用到的库（注释import告知发布程序打包这些库，但不实际执行import）
@@ -158,11 +159,12 @@ mainForm.btnGear.oncommand = function(id, event){
 	popmenu.add("日志条目: " + tostring(#tabKeysLog));
 	popmenu.add();//分隔线
 	popmenu.add("关于 Keybored", function(id){
+		import fsys.version;
 		var aboutForm = ..win.form(text="关于 Keybored";right=300;bottom=240;parent=mainForm;border="dialog frame");
 		aboutForm.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
 		aboutForm.add(
 			picturebox={cls="picturebox";left=110;top=15;right=190;bottom=95;center=1;image="/res/ico.ico";z=1};
-			staticVersion={cls="static";text="Keybored v1.2.0";left=50;top=105;right=250;bottom=125;align="center";transparent=1;font={LOGFONT(name='微软雅黑';h=-14;weight=700)};z=2};
+			staticVersion={cls="static";text="Keybored v"+tostring(fsys.version.getInfo(io._exepath).fileVersion,"%d.%d.%1d");left=50;top=105;right=250;bottom=125;align="center";transparent=1;font={LOGFONT(name='微软雅黑';h=-14;weight=700)};z=2};
 			staticLink={cls="static";text="https://github.com/jiezg/keybored";left=30;top=135;right=270;bottom=155;align="center";transparent=1;font={LOGFONT(name='微软雅黑';h=-12;weight=400;color=16711680)};notify=1;z=3};
 			btnOk={cls="button";text="确定";left=110;top=175;right=190;bottom=200;z=4};
 		);
