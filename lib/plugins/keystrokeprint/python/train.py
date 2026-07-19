@@ -13,6 +13,9 @@
 7. 写入训练结果
 """
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import argparse
 import json
 import os
@@ -123,8 +126,9 @@ def train_random_forest(features: np.ndarray, scaler: StandardScaler) -> tuple:
     n_samples = len(scaled)
 
     # 合成负样本（在特征空间中随机偏移）
+    # 噪声幅度需足够大（8σ），避免负样本与正样本过近导致 rf 决策边界过窄、对任何输入都预测 1
     rng = np.random.RandomState(42)
-    neg_samples = scaled + rng.randn(n_samples, scaled.shape[1]) * 3
+    neg_samples = scaled + rng.randn(n_samples, scaled.shape[1]) * 8
 
     X = np.vstack([scaled, neg_samples])
     y = np.hstack([np.ones(n_samples), np.zeros(n_samples)])
@@ -136,9 +140,12 @@ def train_random_forest(features: np.ndarray, scaler: StandardScaler) -> tuple:
 
 
 def export_model_onnx(model, input_dim: int, output_path: str):
-    """将sklearn模型导出为ONNX格式"""
+    """将sklearn模型导出为ONNX格式（含概率输出）"""
     initial_type = [("float_input", FloatTensorType([None, input_dim]))]
-    onnx_model = convert_sklearn(model, initial_types=initial_type)
+    # 启用 zipmap 让 ONNX 第二输出为概率矩阵 [n_samples, n_classes]
+    # 推理时取类别1的概率均值，得到连续 similarity（0.0-1.0），避免硬分类的离散跳变
+    options = {id(model): {'zipmap': True}}
+    onnx_model = convert_sklearn(model, initial_types=initial_type, options=options)
     with open(output_path, "wb") as f:
         f.write(onnx_model.SerializeToString())
 
@@ -218,6 +225,15 @@ def main():
         onnx_path = os.path.join(args.output, "model.onnx")
         export_model_onnx(model, features.shape[1], onnx_path)
         meta["onnx_model"] = "model.onnx"
+        # 训练集自测：用训练样本验证模型是否能正确识别为本人
+        # 若自测 similarity < 0.9，说明模型欠拟合或负样本合成过强，需调参
+        scaled_train = scaler.transform(features)
+        train_pred = model.predict(scaled_train)
+        train_sim = float(np.sum(train_pred == 1) / len(train_pred))
+        print(f"[键纹训练] 训练集自测 similarity: {train_sim:.4f}")
+        if train_sim < 0.9:
+            print("[键纹训练] 警告: 训练集自测相似度低于 0.9，模型可能欠拟合")
+        meta["train_self_sim"] = train_sim
 
     # 7. 保存归一化参数
     scaler_path = os.path.join(args.output, "scaler.pkl")
@@ -230,7 +246,14 @@ def main():
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
     print(f"[键纹训练] 训练完成! 模型保存至: {args.output}")
-    print(f"[键纹训练] 模型类型: {model_type}, 样本数: {n_samples}")
+    print(f"[键纹训练] 模型类型: {model_type}, 样本数: {n_samples}", flush=True)
+
+    #强制退出，绕过 sklearn/numpy OpenMP 线程池在 atexit 清理阶段的挂起问题
+    #所有文件已在 with 块中关闭，meta.json 已写入，可安全跳过 atexit
+    import os as _os, sys as _sys
+    _sys.stdout.flush()
+    _sys.stderr.flush()
+    _os._exit(0)
 
 
 if __name__ == "__main__":

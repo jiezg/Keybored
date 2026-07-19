@@ -166,13 +166,18 @@ var init = function(ownerForm){
 				gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
 			}
 
-			fxForm.show(true);
+			//不抢焦点方式显示窗口，并显式置顶确保在所有窗口之上
+			::User32.ShowWindow(hwnd, 4/*SW_SHOWNOACTIVATE*/);
+			::User32.SetWindowPos(hwnd, -1/*HWND_TOPMOST*/, 0,0,0,0, 0x13/*SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE*/);
 			layeredWnd.redraw();
 
 			//排除任务栏预览
 			var DwmApi = raw.loadDll("Dwmapi.dll");
 			var excludeFromPeek = { INT value = 1 };
 			DwmApi.DwmSetWindowAttribute(hwnd, 12/*_DWMWA_EXCLUDED_FROM_PEEK*/, excludeFromPeek, 4);
+
+			//周期性重新置顶（防止被其他窗口抢占 z-order）
+			var lastTopmostTime = time.tick();
 
 			//动画帧更新定时器（帧率由 initialFps 决定，变更帧率需重启插件）
 			var timerId = null;
@@ -198,6 +203,12 @@ var init = function(ownerForm){
 				}
 
 				//动态读取参数（设置页可实时修改）
+				//每2秒重新置顶，防止被其他窗口抢占 z-order
+				var now = time.tick();
+				if(now - lastTopmostTime > 2000){
+					::User32.SetWindowPos(hwnd, -1/*HWND_TOPMOST*/, 0,0,0,0, 0x13/*SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE*/);
+					lastTopmostTime = now;
+				}
 			//业务逻辑用 try-catch 隔离，防止单帧异常导致线程退出
 			try{
 				if(controlTable.maxParticles) maxParticles = controlTable.maxParticles;

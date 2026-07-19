@@ -1,25 +1,55 @@
 //keystrokeprint 键纹分析插件入口
-//订阅按键事件，自维护样本库
+//启用后进入后台推理，左下角叠加层显示身份标识
+//设置界面可训练新身份、配置推理参数
 //由 plugin.loadAll() 通过 loadcodex 加载
 import plugin;
 import fsys;
 import web.json;
+import thread.table;
+import thread.command;
+import win.ui;
+import win.ui.layered;
+import gdip;
+import gdip.path;
+import gdip.solidBrush;
+import gdip.family;
+import gdip.font;
+import gdip.stringFormat;
+import gdi;
+import process.popen;
+import process.python;
 
 //获取加载上下文
 var ctx = plugin.getCurrentContext();
 var pluginId = ctx.pluginId;
 var ownerForm = ctx.ownerForm;
+var pluginConfig = ctx.config;
 
-//===== 自维护样本库 =====
-var BUFFER_SIZE = 2000;
-var collectBuffer = {};
-var collectWritePos = 0;
-var isCollecting = false;
-var collectSessionId = null;
+//===== 配置项（从 plugin.json 读取，有默认值） =====
+var SAMPLE_TARGET = pluginConfig.sampleTarget || 500;       //训练目标按键数
+var INFER_INTERVAL = pluginConfig.inferInterval || 10;       //推理间隔（秒）
+var INFER_TIMEOUT = pluginConfig.inferTimeout || 30;         //无按键超时（秒）
+var CONFIDENCE_THRESHOLD = pluginConfig.confidenceThreshold || 0.6; //置信阈值
+var SHOW_OVERLAY = pluginConfig.showOverlay !== false;       //是否显示叠加层
+var FILTER_KEYS = pluginConfig.filterKeys !== false;         //是否过滤无效按键（默认启用）
+var BUFFER_MAX = 500;  //推理缓冲区最大事件数
+var MIN_KEYS_FOR_INFER = 100; //推理最小按键数
 
-var sampleDir = io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\samples\");
+//嵌入式 Python 配置（离线部署用，需提前手动准备 /py/ 目录）
+var EMBED_PY_PATH = "/py/python.exe";  //相对 EXE 根目录
 
-//键位分类映射（隐私脱敏）
+//有效键分类集合（过滤模式下只保留字母、数字、空格）
+var validKeyCats = { [1]=1; [2]=1; [3]=1 };
+
+//===== 路径 =====
+var pluginDir = plugin.getPluginDir() + "keystrokeprint\";
+var pythonDir = pluginDir + "python\";
+var modelBaseDir = pluginDir + "python\model\";
+var sampleDir = pythonDir + "samples\";
+var inferResultPath = pluginDir + "python\infer_result.json";
+var inferTmpSamplePath = pluginDir + "python\infer_tmp.json";
+
+//===== 键位分类映射（隐私脱敏） =====
 var keyCategoryMap = {
 	[0x41]=1;[0x42]=1;[0x43]=1;[0x44]=1;[0x45]=1;[0x46]=1;[0x47]=1;
 	[0x48]=1;[0x49]=1;[0x4A]=1;[0x4B]=1;[0x4C]=1;[0x4D]=1;[0x4E]=1;
@@ -35,37 +65,29 @@ var keyCategoryMap = {
 	[0x25]=12;[0x26]=12;[0x27]=12;[0x28]=12;
 };
 
-//订阅按键事件（移到start中，确保注册后才订阅）
-var onKeyDown = function(data){
-	if(!isCollecting) return;
-	var cat = keyCategoryMap[data.vkcode] || 0;
-	var item = { type=1; cat=cat; ts=data.timestamp; };
-	if(#collectBuffer < BUFFER_SIZE){
-		table.push(collectBuffer, item);
-	}
-	else{
-		collectWritePos = (collectWritePos % BUFFER_SIZE) + 1;
-		collectBuffer[collectWritePos] = item;
-	}
-};
-var onKeyUp = function(data){
-	if(!isCollecting) return;
-	var cat = keyCategoryMap[data.vkcode] || 0;
-	var item = { type=2; cat=cat; ts=data.timestamp; };
-	if(#collectBuffer < BUFFER_SIZE){
-		table.push(collectBuffer, item);
-	}
-	else{
-		collectWritePos = (collectWritePos % BUFFER_SIZE) + 1;
-		collectBuffer[collectWritePos] = item;
-	}
-};
+//===== 推理滚动缓冲区（环形，用于后台推理） =====
+var inferBuffer = {};
+var inferWritePos = 0;
+var lastKeyTime = 0;
 
-//===== Python进程管理 =====
+//===== 训练缓冲区（线性，达到目标后停止） =====
+var collectBuffer = {};
+var isCollecting = false;
+var collectSessionId = null;
+var trainTargetCount = SAMPLE_TARGET;
+
+//===== Python 路径 =====
 var pythonExe = null;
 
 findPython = function(){
 	if(pythonExe) return pythonExe;
+	//1. 优先检查嵌入式 Python（/py/python.exe，离线部署用）
+	var embedPath = io.fullpath(EMBED_PY_PATH);
+	if(io.exist(embedPath)){
+		pythonExe = embedPath;
+		return pythonExe;
+	}
+	//2. 回退到系统 Python（开发调试用，离线环境不适用）
 	var candidates = {"python"; "python3"};
 	for(i=1;#candidates;1){
 		var prcs = io.popen(candidates[i] + " --version");
@@ -79,26 +101,362 @@ findPython = function(){
 	return null;
 }
 
-getPythonDir = function(){
-	return io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\");
+//检查 Python 依赖是否完整（sklearn/skl2onnx/onnxruntime/numpy）
+checkPythonDeps = function(){
+	if(!findPython()) return "未找到Python";
+	//用数组参数形式让 aardio 自动处理转义
+	var prcs = process.popen(pythonExe, {"-c"; "import sklearn, skl2onnx, onnxruntime, numpy; print('ok')"});
+	if(!prcs) return "启动Python失败";
+	var output = prcs.read(-1);
+	prcs.close();
+	if(output && string.find(output, "ok")) return null;
+	//有错误，提取关键信息
+	var errMsg = "缺少Python依赖";
+	if(output && #output > 0){
+		var lines = string.split(output, '\n');
+		for(i=#lines; 1; -1){
+			if(#lines[i] > 0){
+				errMsg = string.trim(lines[i]);
+				break;
+			}
+		}
+	}
+	//嵌入式 Python 缺依赖时提示初始化环境
+	var isEmbed = io.exist(io.fullpath(EMBED_PY_PATH));
+	if(isEmbed){
+		return "嵌入式Python依赖缺失，请在设置中点击\"初始化Python环境\"";
+	}
+	return errMsg + " (pip install scikit-learn skl2onnx onnxruntime numpy)";
 }
 
-getModelDir = function(userId){
-	var dir = io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\model\" + userId + "\");
-	fsys.createDir(dir);
-	return dir;
+//检测 Python 环境状态（供设置界面显示）
+getPyEnvStatus = function(){
+	var embedPath = io.fullpath(EMBED_PY_PATH);
+	if(io.exist(embedPath)){
+		//嵌入式 Python 存在，检查依赖
+		var prcs = process.popen(embedPath, {"-c"; "import sklearn, skl2onnx, onnxruntime, numpy; print('ok')"});
+		if(!prcs) return "嵌入式Python (启动失败)";
+		var output = prcs.read(-1);
+		prcs.close();
+		if(output && string.find(output, "ok")){
+			return "嵌入式Python (就绪)";
+		}
+		else{
+			return "嵌入式Python (依赖缺失)";
+		}
+	}
+	//嵌入式不存在，检查系统 Python
+	var candidates = {"python"; "python3"};
+	for(i=1;#candidates;1){
+		var prcs = io.popen(candidates[i] + " --version");
+		var output = prcs.read(-1);
+		prcs.close();
+		if(output && string.find(output, "Python 3")){
+			return "系统Python (开发模式)";
+		}
+	}
+	return "未找到Python";
 }
 
-getSampleDir = function(){
-	return sampleDir;
+//===== 多身份模型扫描 =====
+scanModels = function(){
+	var models = {};
+	if(!fsys.isDir(modelBaseDir)) return models;
+	var files, folders = fsys.list(modelBaseDir);
+	if(!folders) return models;
+	for(i=1;#folders;1){
+		var dir = modelBaseDir + folders[i] + "\";
+		var metaPath = dir + "meta.json";
+		if(io.exist(metaPath)){
+			try{
+				var metaText = string.load(metaPath);
+				var meta = web.json.parse(metaText);
+				if(meta && meta.user_id && meta.model_type){
+					table.push(models, {userId=meta.user_id; dir=dir; modelType=meta.model_type});
+				}
+			}
+			catch(e){}
+		}
+	}
+	return models;
 }
 
-getInferResultPath = function(){
-	return io.fullpath(plugin.getPluginDir() + "keystrokeprint\python\infer_result.json");
+//===== 推理状态（跨线程共享） =====
+var inferState = thread.table("{A1B2C3D4-KEYSTROKE-INFER-STATE}");
+inferState.dispose = false;
+inferState.matchedUserId = null;
+inferState.bestSimilarity = 0;
+inferState.isMatch = false;
+inferState.lastInferTime = 0;
+
+//===== 叠加层窗口 =====
+var overlay = null;
+
+createOverlay = function(){
+	if(overlay) return;
+	if(!SHOW_OVERLAY) return;
+
+	var screenW, screenH = win.getScreen();
+	var ovW = 140;
+	var ovH = 160;
+	var ovX = 20;
+	var ovY = screenH - ovH - 20;
+
+	//创建全屏透明分层窗口（窗口覆盖全屏，但在左下角绘制内容）
+	var ovForm = win.form(
+		right = screenW;
+		bottom = screenH;
+		border = "none";
+		title = "";
+		topmost = true;
+		transparent = true;
+	);
+	ovForm.modifyStyleEx(0, 0x20);       //WS_EX_TRANSPARENT 点击穿透
+	ovForm.modifyStyleEx(0, 0x80);       //WS_EX_TOOLWINDOW 不在任务栏
+	ovForm.modifyStyleEx(0x40000, 0);    //移除 WS_EX_APPWINDOW
+	ovForm.modifyStyleEx(0, 0x08000000); //WS_EX_NOACTIVATE 不抢焦点
+
+	var layeredWnd = win.ui.layered(ovForm, -1);
+	var hwnd = ovForm.hwnd;
+	var hdc = ::GetDC(hwnd);
+	var hMemDc = ::CreateCompatibleDC(hdc);
+	var hMemBmp = ::Gdi32.CreateDIBSectionP(hMemDc, {
+		INT cbSize = 40;
+		int cx = screenW;
+		int cy = -screenH;
+		WORD planes = 1;
+		WORD bitCount = 32;
+		INT compression;
+		INT size;
+		int xpm;
+		int ypm;
+		INT clrUsed;
+		INT clrImportant;
+	}, 0, {ptr v}, null, 0);
+	var hOldBmp = ::SelectObject(hMemDc, hMemBmp);
+	var cachedGraphics = gdip.graphics(hMemDc);
+	cachedGraphics.smoothingMode = 2; //HighQuality
+	cachedGraphics.textRenderingHint = 3; //AntiAlias
+
+	//GDI+ 对象缓存
+	var bgBrush = gdip.solidBrush(0x00333333);
+	var silhouetteBrush = gdip.solidBrush(0x00FFFFFF);
+	var textBrush = gdip.solidBrush(0x00FFFFFF);
+	var barBgBrush = gdip.solidBrush(0x44888888);    //进度条背景（半透明灰）
+	var barFgBrush = gdip.solidBrush(0xFF22D3EE);    //进度条前景（青色，与已识别剪影同色）
+	var fontFamily = gdip.family("微软雅黑");
+	var fontLarge = gdip.font(fontFamily, 16, 1/*Bold*/);
+	var strFormat = gdip.stringFormat();
+	strFormat.align = 1; //Center（水平居中）
+	strFormat.lineAlign = 1; //Center（垂直居中）
+
+	//剪影路径（半身：圆头 + 梯形肩膀）
+	var silhouettePath = gdip.path(1);
+
+	//当前显示状态
+	var displayUserId = null;  //null=未识别
+	var displayConfidence = 0;  //当前显示的置信值（0-1，渐变动画用）
+	var targetConfidence = 0;  //目标置信值（推理结果，displayConfidence 渐变到此值）
+	var lastTopmostTime = time.tick();
+
+	//更新剪影路径
+	updateSilhouettePath = function(cx, cy, size){
+		silhouettePath.reset();
+		//头部：圆形
+		var headR = size * 0.22;
+		silhouettePath.addEllipse(cx - headR, cy - size * 0.5, headR * 2, headR * 2);
+		//肩膀：梯形（圆角矩形近似）
+		var shoulderTop = cy - size * 0.06;
+		var shoulderBottom = cy + size * 0.4;
+		var shoulderHalfTop = size * 0.18;
+		var shoulderHalfBottom = size * 0.42;
+		silhouettePath.addPolygon({
+			{cx - shoulderHalfTop, shoulderTop};
+			{cx + shoulderHalfTop, shoulderTop};
+			{cx + shoulderHalfBottom, shoulderBottom};
+			{cx - shoulderHalfBottom, shoulderBottom};
+		});
+	}
+
+	//覆盖 redraw：绘制叠加层
+	layeredWnd.redraw = function(){
+		cachedGraphics.clear(0x00000000);
+
+		//叠加层中心位置（左下角）
+		var cx = ovX + ovW / 2;
+		var cy = ovY + ovH / 2 - 10;
+
+		//1. 半透明圆角背景
+		bgBrush.color = 0x66333333;
+		var bgPath = gdip.path(1);
+		bgPath.addRoundRect(ovX, ovY, ovW, ovH, 12);
+		bgPath.fill(cachedGraphics, bgBrush);
+		bgPath.delete();
+
+		//2. 剪影（灰色=未识别，青色=已识别）
+		var silhouetteColor;
+		if(displayUserId){
+			silhouetteColor = 0xFF22D3EE; //青色
+		}
+		else{
+			silhouetteColor = 0xFF888888; //灰色
+		}
+		silhouetteBrush.color = silhouetteColor;
+		updateSilhouettePath(cx, cy, 70);
+		silhouettePath.fill(cachedGraphics, silhouetteBrush);
+
+		//3. 身份名文本（剪影下方）
+		var displayName = displayUserId ? displayUserId : "未识别";
+		var textColor;
+		if(displayUserId){
+			textColor = 0xFFFFFFFF; //白色
+		}
+		else{
+			textColor = 0xFFAAAAAA; //浅灰
+		}
+		textBrush.color = textColor;
+
+		//3.5 置信值进度条（剪影下方、文本上方）
+		var barW = ovW - 30;
+		var barH = 6;
+		var barX = ovX + 15;
+		var barY = ovY + ovH - 50;
+		var barPath = gdip.path(1);
+		//背景条
+		barPath.addRoundRect(barX, barY, barW, barH, 3);
+		barPath.fill(cachedGraphics, barBgBrush);
+		//前景条（宽度按置信值缩放）
+		var fgW = math.max(barW * displayConfidence, 2);  //最小2像素保证可见
+		barPath.reset();
+		barPath.addRoundRect(barX, barY, fgW, barH, 3);
+		barPath.fill(cachedGraphics, barFgBrush);
+		barPath.delete();
+
+		var textRect = ::RECTF(ovX, ovY + ovH - 40, ovW, 30);
+		cachedGraphics.drawString(displayName, fontLarge, textRect, strFormat, textBrush);
+
+		gdi.updateLayeredWindow(hwnd, hMemDc, ::SIZE(screenW, screenH));
+	}
+
+	//更新显示状态并重绘
+	updateDisplay = function(userId, confidence){
+		confidence = confidence : 0;
+		targetConfidence = confidence;
+		//身份变化立即更新并重绘，置信值由动画定时器渐变到 targetConfidence
+		if(displayUserId != userId){
+			displayUserId = userId;
+			layeredWnd.redraw();
+		}
+		//置信值变化不在此处重绘，由渐变定时器每200ms靠近目标并重绘
+	}
+
+	//显示窗口（不抢焦点 + 置顶）
+	::User32.ShowWindow(hwnd, 4/*SW_SHOWNOACTIVATE*/);
+	::User32.SetWindowPos(hwnd, -1/*HWND_TOPMOST*/, 0,0,0,0, 0x13/*SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE*/);
+	layeredWnd.redraw();
+
+	//排除任务栏预览
+	var DwmApi = raw.loadDll("Dwmapi.dll");
+	var excludeFromPeek = { INT value = 1 };
+	DwmApi.DwmSetWindowAttribute(hwnd, 12/*_DWMWA_EXCLUDED_FROM_PEEK*/, excludeFromPeek, 4);
+
+	overlay = {
+		form = ovForm;
+		layered = layeredWnd;
+		hwnd = hwnd;
+		hdc = hdc;
+		hMemDc = hMemDc;
+		hMemBmp = hMemBmp;
+		hOldBmp = hOldBmp;
+		graphics = cachedGraphics;
+	bgBrush = bgBrush;
+	silhouetteBrush = silhouetteBrush;
+	textBrush = textBrush;
+	barBgBrush = barBgBrush;
+	barFgBrush = barFgBrush;
+	fontFamily = fontFamily;
+		fontLarge = fontLarge;
+		strFormat = strFormat;
+		silhouettePath = silhouettePath;
+		updateDisplay = updateDisplay;
+		lastTopmostTime = lastTopmostTime;
+	}
+
+	//周期性置顶 + 置信值渐变动画 + 超时检测（每200ms）
+	//保存 timer id 到 overlay，供 destroyOverlay 用数字 id 正确清除
+	//(clearInterval 传 true 无效，必须传 setInterval 返回的数字 id)
+	overlay.timerId = ovForm.setInterval(function(){
+		var now = time.tick();
+		if(now - lastTopmostTime > 2000){
+			::User32.SetWindowPos(hwnd, -1/*HWND_TOPMOST*/, 0,0,0,0, 0x13);
+			lastTopmostTime = now;
+		}
+
+		//置信值渐变动画：每周期靠近目标 15%，约1秒达到目标值
+		//让进度条平滑变化，而非推理结果一更新就跳变
+		var diff = targetConfidence - displayConfidence;
+		if(math.abs(diff) >= 0.01){
+			displayConfidence += diff * 0.15;
+			layeredWnd.redraw();
+		}
+		else if(diff != 0){
+			displayConfidence = targetConfidence;
+			layeredWnd.redraw();
+		}
+
+		//超时检测：无按键超过 INFER_TIMEOUT 秒 → 未识别 + 清空显示状态
+		if(lastKeyTime > 0 && (now - lastKeyTime > INFER_TIMEOUT * 1000)){
+			if(displayUserId != null){
+				updateDisplay(null, 0);
+			}
+			//只清空显示状态，避免 syncTimer 读到残留 matchedUserId 导致闪烁
+			//不清空 inferBuffer：用户恢复打字时，缓冲区已有历史事件可立即推理
+			inferState.matchedUserId = null;
+			inferState.bestSimilarity = 0;
+			inferState.isMatch = false;
+		}
+	}, 200);
 }
 
-flushBuffer = function(){
+destroyOverlay = function(){
+	if(!overlay) return;
+	//先停止定时器（clearInterval 必须传 setInterval 返回的数字 id，传 true 无效）
+	if(overlay.timerId){
+		overlay.form.clearInterval(overlay.timerId);
+		overlay.timerId = null;
+	}
+	//先隐藏窗口再销毁：分层窗口（WS_EX_LAYERED）DestroyWindow 后 DWM 可能不立即清除屏幕位图，
+	//ShowWindow(SW_HIDE) 会触发 DWM 立即重绘该区域，避免位图残留
+	::User32.ShowWindow(overlay.hwnd, 0/*SW_HIDE*/);
+	//销毁窗口（提前到资源清理之前，确保即使后续清理抛异常窗口也已销毁）
+	::User32.DestroyWindow(overlay.hwnd);
+	//清理 GDI+ / GDI 对象（用 try-catch 包裹，避免异常影响 overlay = null）
+	try{
+		overlay.silhouettePath.delete();
+		overlay.strFormat.delete();
+		overlay.fontLarge.delete();
+		overlay.fontFamily.delete();
+		overlay.bgBrush.delete();
+		overlay.silhouetteBrush.delete();
+		overlay.textBrush.delete();
+		overlay.barBgBrush.delete();
+		overlay.barFgBrush.delete();
+		overlay.graphics.delete();
+		::SelectObject(overlay.hMemDc, overlay.hOldBmp);
+		::DeleteObject(overlay.hMemBmp);
+		::DeleteDC(overlay.hMemDc);
+		::ReleaseDC(overlay.hwnd, overlay.hdc);
+	}
+	catch(e){
+		..io.print("destroyOverlay 清理资源异常: " + tostring(e));
+	}
+	overlay = null;
+}
+
+//===== 训练缓冲区管理 =====
+flushCollectBuffer = function(){
 	if(#collectBuffer == 0) return null;
+	fsys.createDir(sampleDir);
 	var filePath = sampleDir + "session_" + tostring(collectSessionId) + ".json";
 	var output = { session_id=collectSessionId; event_count=#collectBuffer; events={} };
 	for(i=1;#collectBuffer;1){
@@ -109,13 +467,194 @@ flushBuffer = function(){
 	return filePath;
 }
 
-clearBuffer = function(){
+clearCollectBuffer = function(){
 	collectBuffer = {};
-	collectWritePos = 0;
 }
 
-//===== 设置对话框 =====
-var settingsForm = null;
+//===== 后台推理线程 =====
+var inferThreadHandle = null;
+
+startInferThread = function(){
+	if(inferThreadHandle) return;
+	if(!findPython()) return;
+
+	var models = scanModels();
+	if(#models == 0) return;
+
+	//构建模型目录列表（逗号分隔，去掉末尾反斜杠避免命令行 \" 转义问题）
+	var modelDirs = "";
+	for(i=1;#models;1){
+		if(i > 1) modelDirs += ",";
+		modelDirs += string.trimright(models[i].dir, "\\");
+	}
+
+	inferState.dispose = false;
+
+	inferThreadHandle = thread.create(
+		function(pythonExe, pythonDir, modelDirs, tmpSamplePath, resultPath, threshold, interval, stateTable){
+			import win;
+			import io;
+			import web.json;
+			import thread.table;
+			import process.popen;
+
+			while(true){
+				//检查退出标志
+				if(stateTable.dispose) break;
+
+				//等待推理间隔（每秒检查退出标志）
+				for(i=1;interval;1){
+					if(stateTable.dispose) return;
+					win.delay(1000);
+				}
+
+				if(stateTable.dispose) break;
+
+				//从共享表读取缓冲区快照（由主线程 syncTimer 写入）
+				var snapshot = stateTable.bufferSnapshot;
+				if(!snapshot || #snapshot < 50) continue;
+
+				//在子线程序列化+写文件（不阻塞主线程）
+				var output = { session_id=1; event_count=#snapshot; events={} };
+				for(i=1;#snapshot;1){
+					table.push(output.events, snapshot[i]);
+				}
+				var jsonText = web.json.stringify(output, true);
+				string.save(tmpSamplePath, jsonText);
+
+				//用数组参数形式让 aardio 自动处理转义（避免路径末尾 \" 问题）
+				var inferParams = {
+					pythonDir + "infer.py";
+					"--model-dirs=" + modelDirs;
+					"--input=" + tmpSamplePath;
+					"--output=" + resultPath;
+					"--threshold=" + tostring(threshold);
+				};
+				var prcs = process.popen(pythonExe, inferParams);
+			if(!prcs) continue;
+			prcs.killOnExit();  //主进程退出时自动杀 python.exe
+			//用 process.waitOne 等待进程退出信号，绕过 popen.waitOne 内部的 read(-1) 阻塞
+			//分6次轮询（每次5秒=共30秒），中间检查 dispose 标志，让主线程能快速中断推理
+			var waited = false;
+			if(prcs.process){
+				for(i=1; 6; 1){
+					if(stateTable.dispose) break;  //主线程要求退出，立即终止等待
+					waited = prcs.process.waitOne(5000);
+					if(waited) break;  //Python 进程已退出
+				}
+			}
+			if(!waited || stateTable.dispose){
+				prcs.terminate();  //超时或被要求退出时强制终止 Python 子进程
+			}
+			prcs.close();
+
+				//读取结果
+				if(io.exist(resultPath)){
+					try{
+						var resultText = string.load(resultPath);
+						var result = web.json.parse(resultText);
+						stateTable.matchedUserId = result.matched_user_id;
+						stateTable.bestSimilarity = result.best_similarity || 0;
+						stateTable.isMatch = result.is_match || false;
+						stateTable.lastInferTime = time.tick();
+					}
+					catch(e){}
+				}
+			}
+		}, pythonExe, pythonDir, modelDirs, inferTmpSamplePath, inferResultPath, CONFIDENCE_THRESHOLD, INFER_INTERVAL, inferState
+	);
+}
+
+stopInferThread = function(){
+	if(!inferThreadHandle) return;
+	inferState.dispose = true;
+	//等待线程退出（最多7秒，覆盖一次5秒轮询周期+缓冲）
+	//推理线程每5秒检查 dispose，检查到后调 prcs.terminate() 退出
+	thread.waitOne(inferThreadHandle, 7000);
+	raw.closeHandle(inferThreadHandle);
+	inferThreadHandle = null;
+}
+
+//===== 主线程状态同步定时器 =====
+var syncTimerId = null;
+
+startSyncTimer = function(ownerForm){
+	if(syncTimerId) return;
+	syncTimerId = ownerForm.setInterval(function(){
+		if(overlay){
+			var now = time.tick();
+			//超时状态下不更新显示（由 createOverlay 定时器管理超时显示和清空状态）
+			//避免两个定时器交替调用 updateDisplay 导致闪烁
+			var isTimeout = (lastKeyTime > 0) && (now - lastKeyTime > INFER_TIMEOUT * 1000);
+			if(!isTimeout){
+				var confidence = inferState.bestSimilarity || 0;
+				//无论是否匹配都更新显示：isMatch=false 时显示"未识别"但进度条仍反映当前置信值
+				var matched = (inferState.isMatch && inferState.matchedUserId) ? inferState.matchedUserId : null;
+				overlay.updateDisplay(matched, confidence);
+			}
+		}
+
+		//将缓冲区引用传给推理线程（非阻塞，序列化+写文件由推理线程完成）
+		//超时也传递，让推理线程继续工作，用户恢复打字时立即有数据可推理
+		if(inferThreadHandle && #inferBuffer >= MIN_KEYS_FOR_INFER){
+			inferState.bufferSnapshot = inferBuffer;
+		}
+	}, 2000);
+}
+
+stopSyncTimer = function(ownerForm){
+	if(syncTimerId && ownerForm){
+		ownerForm.clearInterval(syncTimerId);
+		syncTimerId = null;
+	}
+}
+
+//===== 按键事件回调 =====
+var onKeyDown = function(data){
+	//过滤无效按键（仅保留字母/数字/空格）
+	var cat = keyCategoryMap[data.vkcode] || 0;
+	if(FILTER_KEYS && !validKeyCats[cat]) return;
+
+	//训练采集
+	if(isCollecting){
+		var item = { type=1; cat=cat; ts=data.timestamp; };
+		table.push(collectBuffer, item);
+	}
+
+	//推理缓冲区（环形）
+	var item = { type=1; cat=cat; ts=data.timestamp; };
+	if(#inferBuffer < BUFFER_MAX){
+		table.push(inferBuffer, item);
+	}
+	else{
+		inferWritePos = (inferWritePos % BUFFER_MAX) + 1;
+		inferBuffer[inferWritePos] = item;
+	}
+	lastKeyTime = data.timestamp;
+};
+
+var onKeyUp = function(data){
+	//过滤无效按键（仅保留字母/数字/空格）
+	var cat = keyCategoryMap[data.vkcode] || 0;
+	if(FILTER_KEYS && !validKeyCats[cat]) return;
+
+	//训练采集
+	if(isCollecting){
+		var item = { type=2; cat=cat; ts=data.timestamp; };
+		table.push(collectBuffer, item);
+	}
+
+	//推理缓冲区（环形）
+	var item = { type=2; cat=cat; ts=data.timestamp; };
+	if(#inferBuffer < BUFFER_MAX){
+		table.push(inferBuffer, item);
+	}
+	else{
+		inferWritePos = (inferWritePos % BUFFER_MAX) + 1;
+		inferBuffer[inferWritePos] = item;
+	}
+	lastKeyTime = data.timestamp;
+};
 
 //===== 插件实例 =====
 var instance = {};
@@ -123,227 +662,442 @@ var running = false;
 
 instance.start = function(){
 	running = true;
-	//启动时订阅事件（必须在注册之后调用subscribe才有效）
 	plugin.subscribe(pluginId, plugin.events.KEY_DOWN, onKeyDown);
 	plugin.subscribe(pluginId, plugin.events.KEY_UP, onKeyUp);
-	plugin.reportStatus(pluginId, "运行中");
+
+	//创建叠加层
+	createOverlay();
+
+	//启动后台推理
+	var models = scanModels();
+	if(#models > 0){
+		startInferThread();
+		startSyncTimer(ownerForm);
+		plugin.reportStatus(pluginId, "运行中（已加载" + #models + "个身份）");
+	}
+	else{
+		plugin.reportStatus(pluginId, "运行中（无模型，请先训练）");
+	}
 };
 
 instance.stop = function(){
 	running = false;
-	if(isCollecting){
-		isCollecting = false;
-	}
-	//停止时取消所有订阅
+	isCollecting = false;
 	plugin.unsubscribeAll(pluginId);
+
+	//停止推理线程
+	stopInferThread();
+	stopSyncTimer(ownerForm);
+
+	//关闭叠加层
+	destroyOverlay();
+
+	//清理缓冲区
+	inferBuffer = {};
+	collectBuffer = {};
+
 	plugin.reportStatus(pluginId, "已停止");
 };
 
 instance.dispose = function(){
 	running = false;
 	isCollecting = false;
+	//先销毁 overlay（停止定时器 + 销毁窗口），避免退出过程中定时器继续重绘
+	destroyOverlay();
+	//再停止推理线程（可能阻塞7秒，此时 overlay 已销毁，用户看不到残留）
+	stopInferThread();
+	stopSyncTimer(ownerForm);
+	inferBuffer = {};
 	collectBuffer = {};
 };
 
+//===== 设置对话框 =====
 instance.showSettings = function(parentForm){
-	//弹出键纹分析设置对话框
-	var dlg = win.form(text="键纹分析 设置";right=400;bottom=540;parent=parentForm;border="dialog frame");
-	dlg.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0); //禁止最大化
+	var dlg = win.form(text="键纹分析 设置";right=420;bottom=560;parent=parentForm;border="dialog frame");
+	dlg.modifyStyle(0x10000/*_WS_MAXIMIZEBOX*/, 0);
 	dlg.add(
-		tabSettings={cls="tab";left=10;top=10;right=390;bottom=490;edge=1};
-		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=495;right=200;bottom=515;checked=plugin.getAutoStart(pluginId)};
-		btnReset={cls="button";text="重置";left=280;top=495;right=370;bottom=515};
+		tabSettings={cls="tab";left=10;top=10;right=410;bottom=510;edge=1};
+		chkAutoStart={cls="checkbox";text="随主程序自动启动";left=10;top=515;right=200;bottom=535;checked=plugin.getAutoStart(pluginId)};
+		btnReset={cls="button";text="重置";left=290;top=515;right=400;bottom=535};
 	);
 
-	//训练tab
+	//===== 训练 Tab =====
 	var tabTrain = dlg.tabSettings.add(text="训练");
 	tabTrain.add(
-		editUserId={cls="edit";text="user1";left=90;top=25;right=220;bottom=45;edge=1};
-		staticUserId={cls="static";text="用户名:";left=20;top=25;right=85;bottom=45;transparent=1};
-		btnStartTrain={cls="button";text="开始训练";left=240;top=20;right=340;bottom=48};
-		btnStopTrain={cls="button";text="停止训练";left=240;top=55;right=340;bottom=83;disabled=1};
-		staticSampleCount={cls="static";text="已采集: 0 事件";left=20;top=55;right=220;bottom=75;transparent=1};
-		staticTrainStatus={cls="static";text="状态: 就绪";left=20;top=85;right=360;bottom=105;transparent=1};
-		progressTrain={cls="progress";left=20;top=110;right=360;bottom=130;min=0;max=100;pos=0};
-		staticTrainTip={cls="static";text="训练说明: 点击开始训练后正常打字，建议采集500+按键后停止。";left=20;top=140;right=360;bottom=220;multiline=1;transparent=1};
+		staticUserId={cls="static";text="身份名:";left=20;top=20;right=80;bottom=40;transparent=1};
+		editUserId={cls="edit";text="user1";left=85;top=18;right=200;bottom=40;edge=1};
+		staticTarget={cls="static";text="目标样本量:";left=210;top=20;right=280;bottom=40;transparent=1};
+		cmbTarget={cls="combobox";left=285;top=18;right=380;bottom=40;edge=1;items={"500";"1000";"2000";"5000"}};
+		btnStartTrain={cls="button";text="开始训练";left=20;top=55;right=120;bottom=83};
+		btnStopTrain={cls="button";text="停止训练";left=130;top=55;right=230;bottom=83;disabled=1};
+		staticSampleCount={cls="static";text="已采集: 0";left=240;top=58;right=380;bottom=78;transparent=1};
+		progressTrain={cls="progress";left=20;top=90;right=380;bottom=110;min=0;max=100;pos=0};
+		staticTrainStatus={cls="static";text="状态: 就绪";left=20;top=115;right=380;bottom=135;transparent=1};
+		staticModelListLabel={cls="static";text="已训练身份:";left=20;top=145;right=380;bottom=165;transparent=1};
+		lvModels={cls="listview";left=20;top=170;right=300;bottom=290;edge=1};
+		btnDeleteModel={cls="button";text="删除";left=310;top=170;right=380;bottom=195};
+		staticTrainTip={cls="static";text="说明: 输入身份名(如张三)，选择样本量，点击开始训练后正常打字。到达目标量自动训练。";left=20;top=300;right=380;bottom=360;multiline=1;transparent=1};
+		chkFilterKeys={cls="checkbox";text="过滤无效按键(仅字母/数字/空格)";left=20;top=365;right=380;bottom=385;checked=FILTER_KEYS};
 	);
 
-	//识别tab
-	var tabInfer = dlg.tabSettings.add(text="识别");
-	tabInfer.add(
-		btnLoadModel={cls="button";text="加载模型";left=20;top=25;right=120;bottom=53};
-		btnStartInfer={cls="button";text="开始识别";left=130;top=25;right=230;bottom=53;disabled=1};
-		btnStopInfer={cls="button";text="停止识别";left=240;top=25;right=340;bottom=53;disabled=1};
-		staticModelInfo={cls="static";text="模型: 未加载";left=20;top=65;right=360;bottom=85;transparent=1};
-		progressSimilarity={cls="progress";left=20;top=95;right=360;bottom=115;min=0;max=100;pos=0};
-		staticSimilarity={cls="static";text="相似度: --";left=20;top=125;right=180;bottom=145;transparent=1};
-		staticConfidence={cls="static";text="置信度: --";left=200;top=125;right=360;bottom=145;transparent=1};
-		staticInferStatus={cls="static";text="状态: 就绪";left=20;top=155;right=360;bottom=175;transparent=1};
-		staticInferTip={cls="static";text="识别说明: 加载模型后点击开始识别，系统会实时分析打字者相似度。";left=20;top=185;right=360;bottom=250;multiline=1;transparent=1};
-	);
+	//设置默认目标量
+	tabTrain.cmbTarget.selIndex = 1;
+	var targets = {500;1000;2000;5000};
+	for(i=1;#targets;1){
+		if(targets[i] == SAMPLE_TARGET){
+			tabTrain.cmbTarget.selIndex = i;
+			break;
+		}
+	}
 
-	var loadedModelUserId = null;
-	var inferTimerId = null;
+	//已训练身份列表
+	var refreshModelList = function(){
+		tabTrain.lvModels.clear();
+		//clear() 只清行不清列，首次调用需建列，后续复用避免列数累加
+		if(tabTrain.lvModels.columnCount == 0){
+			tabTrain.lvModels.insertColumn("身份名", 150);
+			tabTrain.lvModels.insertColumn("模型类型", 100);
+		}
+		var models = scanModels();
+		for(i=1;#models;1){
+			tabTrain.lvModels.addItem(models[i].userId);
+			tabTrain.lvModels.setItemText(models[i].modelType, i, 2);
+		}
+	};
+	refreshModelList();
 
-	//训练事件
+	//停用状态下禁用训练相关控件：onKeyDown 已取消订阅，训练收不到按键
+	//用户需先在主界面启动插件，再打开设置训练
+	if(!running){
+		tabTrain.btnStartTrain.disabled = 1;
+		tabTrain.editUserId.disabled = 1;
+		tabTrain.cmbTarget.disabled = 1;
+		tabTrain.staticTrainStatus.text = "状态: 插件未运行，请先在主界面启动插件";
+	}
+
+	//跨线程命令：子线程通过 trainCmd.$onTrainDone / $onTrainStartFailed 通知 UI
+	//替代不存在的 win.postInvoke（aardio 标准库无此 API，调用必抛错导致 UI 永远卡在"训练中"）
+	var trainCmd = thread.command();
+	trainCmd.$onTrainDone = function(success, modelDir){
+		if(success){
+			tabTrain.staticTrainStatus.text = "状态: 训练完成!";
+			tabTrain.progressTrain.pos = 100;
+			refreshModelList();
+			//刷新主界面状态，并按需启动推理线程加载新模型
+			var models = scanModels();
+			if(#models > 0){
+				//插件运行中才启动推理线程；停用状态下 inferBuffer 不填充，启动了也是空跑
+				//停用状态下用户启动插件时，instance.start() 会自动调 startInferThread
+				if(running){
+					plugin.reportStatus(pluginId, "运行中（已加载" + #models + "个身份）");
+					if(!inferThreadHandle){
+						startInferThread();
+						startSyncTimer(ownerForm);
+					}
+				}
+				else{
+					plugin.reportStatus(pluginId, "已停止（已训练" + #models + "个身份）");
+					tabTrain.staticTrainStatus.text = "状态: 训练完成，启动插件后开始推理";
+				}
+			}
+		}
+		else{
+			//不读 stdout（避免阻塞），失败时显示通用错误信息
+			tabTrain.staticTrainStatus.text = "状态: 训练失败，请检查 Python 环境";
+			tabTrain.progressTrain.pos = 0;
+		}
+	};
+	trainCmd.$onTrainStartFailed = function(){
+		tabTrain.staticTrainStatus.text = "状态: 启动训练进程失败";
+		tabTrain.progressTrain.pos = 0;
+	};
+
+	//训练定时器
+	var trainTimerId = null;
+
 	tabTrain.btnStartTrain.oncommand = function(id, event){
-		var userId = tabTrain.editUserId.text;
-		if(!userId || #string.trim(userId) == 0){
-			tabTrain.staticTrainStatus.text = "状态: 请输入用户名";
+		//双重保险：即使 UI 禁用被绕过，逻辑层也拦截
+		//停用状态下 onKeyDown 已取消订阅，训练收不到按键事件
+		if(!running){
+			tabTrain.staticTrainStatus.text = "状态: 插件未运行，无法训练";
+			return;
+		}
+		var userId = string.trim(tabTrain.editUserId.text);
+		if(!userId || #userId == 0){
+			tabTrain.staticTrainStatus.text = "状态: 请输入身份名";
 			return;
 		}
 		if(!findPython()){
-			tabTrain.staticTrainStatus.text = "状态: 未找到Python，请安装Python 3.10+";
+			tabTrain.staticTrainStatus.text = "状态: 未找到Python 3";
 			return;
 		}
+		//检查 Python 依赖是否完整
+		var depErr = checkPythonDeps();
+		if(depErr){
+			tabTrain.staticTrainStatus.text = "状态: " + depErr;
+			return;
+		}
+
+		//读取目标样本量
+		var selIdx = tabTrain.cmbTarget.selIndex;
+		trainTargetCount = targets[selIdx] || 500;
+
 		isCollecting = true;
 		collectBuffer = {};
-		collectWritePos = 0;
 		collectSessionId = time.tick();
-		fsys.createDir(sampleDir);
 		tabTrain.btnStartTrain.disabled = true;
 		tabTrain.btnStopTrain.disabled = false;
-		tabTrain.staticTrainStatus.text = "状态: 采集中...";
+		tabTrain.staticTrainStatus.text = "状态: 采集中... (目标 " + trainTargetCount + ")";
 
-		tabTrain.setInterval(function(){
+		trainTimerId = tabTrain.setInterval(function(){
 			if(!isCollecting) return;
-			tabTrain.staticSampleCount.text = "已采集: " + tostring(#collectBuffer) + " 事件";
-			tabTrain.progressTrain.pos = math.min(100, math.floor(#collectBuffer / 5));
+			var count = #collectBuffer;
+			tabTrain.staticSampleCount.text = "已采集: " + tostring(count);
+			tabTrain.progressTrain.pos = math.min(100, math.floor(count / trainTargetCount * 100));
+
+			//到达目标自动停止
+			if(count >= trainTargetCount){
+				//触发停止训练逻辑
+				isCollecting = false;
+				tabTrain.btnStartTrain.disabled = false;
+				tabTrain.btnStopTrain.disabled = true;
+				if(trainTimerId){
+					tabTrain.clearInterval(trainTimerId);
+					trainTimerId = null;
+				}
+
+				if(#collectBuffer < 50){
+					tabTrain.staticTrainStatus.text = "状态: 样本不足";
+					return;
+				}
+
+				var samplePath = flushCollectBuffer();
+				clearCollectBuffer();
+
+				if(!samplePath){
+					tabTrain.staticTrainStatus.text = "状态: 保存样本失败";
+					return;
+				}
+
+				tabTrain.staticTrainStatus.text = "状态: 训练中...";
+				tabTrain.progressTrain.pos = 0;
+
+				var modelDir = modelBaseDir + userId + "\";
+				//用数组参数形式让 aardio 自动处理转义，避免路径末尾 "\" 被解析为转义引号
+				//（Windows CommandLineToArgvW 会把 "path\" 中的 \" 当作转义引号，导致参数错乱）
+				var trainParams = {
+					pythonDir + "train.py";
+					"--input=" + string.trimright(sampleDir, "\\");
+					"--output=" + string.trimright(modelDir, "\\");
+					"--user-id=" + userId;
+				};
+
+				thread.create(
+				function(pyExe, params, modelDir, cmd){
+					import io;
+					import process.popen;
+					//process.popen 默认 createNoWindow=true，无需额外传 SW_HIDE
+					var prcs = process.popen(pyExe, params);
+					if(!prcs){
+						//启动失败也要通知 UI，否则一直卡在"训练中"
+						cmd.$onTrainStartFailed();  //异步 post 到主线程
+						return;
+					}
+					prcs.killOnExit();  //主进程退出时自动杀子进程，避免孤儿
+					//直接用 process.waitOne 等待进程退出信号，绕过 popen.waitOne 内部的 read(-1) 阻塞
+					//(popen.waitOne 返回 true 时会同步调 read(-1)，sklearn 工作线程持 stdout 副本时会卡死)
+					var waited = prcs.process ? prcs.process.waitOne(60000) : null;  //60秒超时（train.py 用 os._exit(0) 正常退出后立即返回）
+					if(!waited){
+						prcs.terminate();
+					}
+					prcs.close();
+					var success = io.exist(modelDir + "meta.json");
+					cmd.$onTrainDone(success, modelDir);  //异步 post 到主线程
+				}, pythonExe, trainParams, modelDir, trainCmd
+			);
+			}
 		}, 500);
 	};
 
 	tabTrain.btnStopTrain.oncommand = function(id, event){
+		if(trainTimerId){
+			tabTrain.clearInterval(trainTimerId);
+			trainTimerId = null;
+		}
 		isCollecting = false;
 		tabTrain.btnStartTrain.disabled = false;
 		tabTrain.btnStopTrain.disabled = true;
 
 		if(#collectBuffer < 50){
 			tabTrain.staticTrainStatus.text = "状态: 样本不足（至少50事件）";
+			clearCollectBuffer();
 			return;
 		}
 
-		var samplePath = flushBuffer();
-		clearBuffer();
+		var samplePath = flushCollectBuffer();
+		clearCollectBuffer();
 
 		if(!samplePath){
-			tabTrain.staticTrainStatus.text = "状态: flush失败";
+			tabTrain.staticTrainStatus.text = "状态: 保存样本失败";
 			return;
 		}
 
 		tabTrain.staticTrainStatus.text = "状态: 训练中...";
 		tabTrain.progressTrain.pos = 0;
 
-		var userId = tabTrain.editUserId.text;
-		var pythonDir = getPythonDir();
-		var modelDir = getModelDir(userId);
-		var sDir = getSampleDir();
-
-		var trainCmd = pythonExe + ' "' + pythonDir + 'train.py"'
-			+ ' --input "' + sDir + '"'
-			+ ' --output "' + modelDir + '"'
-			+ ' --user-id "' + userId + '"';
+		var userId = string.trim(tabTrain.editUserId.text);
+		var modelDir = modelBaseDir + userId + "\";
+		//用数组参数形式让 aardio 自动处理转义（同自动停止分支）
+		var trainParams = {
+			pythonDir + "train.py";
+			"--input=" + string.trimright(sampleDir, "\\");
+			"--output=" + string.trimright(modelDir, "\\");
+			"--user-id=" + userId;
+		};
 
 		thread.create(
-			function(cmd, modelDir, dlgHwnd){
-				import win;
-				import io;
-				var prcs = io.popen(cmd);
-				prcs.read(-1);
-				prcs.close();
-				var success = io.exist(modelDir + "meta.json");
-				win.postInvoke(dlgHwnd, function(){
-					if(success){
-						tabTrain.staticTrainStatus.text = "状态: 训练完成!";
-						tabTrain.progressTrain.pos = 100;
-					}
-					else{
-						tabTrain.staticTrainStatus.text = "状态: 训练失败";
-						tabTrain.progressTrain.pos = 0;
-					}
-				});
-			}, trainCmd, modelDir, dlg.hwnd
-		);
-	};
-
-	//识别事件
-	tabInfer.btnLoadModel.oncommand = function(id, event){
-		var userId = tabTrain.editUserId.text;
-		var modelDir = getModelDir(userId);
-		var metaPath = modelDir + "meta.json";
-		if(!io.exist(metaPath)){
-			tabInfer.staticModelInfo.text = "模型: 未找到，请先训练";
-			return;
-		}
-		var metaText = string.load(metaPath);
-		var meta = web.json.parse(metaText);
-		loadedModelUserId = userId;
-		tabInfer.staticModelInfo.text = "模型: " + userId + " (" + meta.modelType + ")";
-		tabInfer.btnStartInfer.disabled = false;
-	};
-
-	tabInfer.btnStartInfer.oncommand = function(id, event){
-		if(!loadedModelUserId) return;
-		if(!findPython()){
-			tabInfer.staticInferStatus.text = "状态: 未找到Python";
-			return;
-		}
-		isCollecting = true;
-		collectBuffer = {};
-		collectWritePos = 0;
-		collectSessionId = time.tick();
-		tabInfer.btnStartInfer.disabled = true;
-		tabInfer.btnStopInfer.disabled = false;
-		tabInfer.staticInferStatus.text = "状态: 识别中...";
-
-		inferTimerId = tabInfer.setInterval(function(){
-			if(#collectBuffer < 30) return;
-			var samplePath = flushBuffer();
-			clearBuffer();
-			if(!samplePath) return;
-
-			var modelDir = getModelDir(loadedModelUserId);
-			var pythonDir = getPythonDir();
-			var resultPath = getInferResultPath();
-
-			var inferCmd = pythonExe + ' "' + pythonDir + 'infer.py"'
-				+ ' --model "' + modelDir + '"'
-				+ ' --input "' + samplePath + '"'
-				+ ' --output "' + resultPath + '"';
-
-			var prcs = io.popen(inferCmd);
-			prcs.read(-1);
-			prcs.close();
-
-			if(io.exist(resultPath)){
-				var resultText = string.load(resultPath);
-				var result = web.json.parse(resultText);
-				var similarity = result.similarity || 0;
-				var confidence = result.confidence || "low";
-				tabInfer.progressSimilarity.pos = math.floor(similarity * 100);
-				tabInfer.staticSimilarity.text = "相似度: " + tostring(math.floor(similarity * 100)) + "%";
-				tabInfer.staticConfidence.text = "置信度: " + confidence;
+		function(pyExe, params, modelDir, cmd){
+			import io;
+			import process.popen;
+			var prcs = process.popen(pyExe, params);
+			if(!prcs){
+				cmd.$onTrainStartFailed();  //异步 post 到主线程
+				return;
 			}
-		}, 2000);
+			prcs.killOnExit();  //主进程退出时自动杀子进程，避免孤儿
+			//直接用 process.waitOne 等待进程退出信号，绕过 popen.waitOne 内部的 read(-1) 阻塞
+			var waited = prcs.process ? prcs.process.waitOne(60000) : null;  //60秒超时
+			if(!waited){
+				prcs.terminate();
+			}
+			prcs.close();
+			var success = io.exist(modelDir + "meta.json");
+			cmd.$onTrainDone(success, modelDir);  //异步 post 到主线程
+		}, pythonExe, trainParams, modelDir, trainCmd
+	);
 	};
 
-	tabInfer.btnStopInfer.oncommand = function(id, event){
-		isCollecting = false;
-		clearBuffer();
-		if(inferTimerId){
-			tabInfer.clearInterval(inferTimerId);
-			inferTimerId = null;
+	//删除模型
+	tabTrain.btnDeleteModel.oncommand = function(id, event){
+		var selIdx = tabTrain.lvModels.selIndex;
+		if(!selIdx){
+			tabTrain.staticTrainStatus.text = "状态: 请先选择要删除的身份";
+			return;
 		}
-		tabInfer.btnStartInfer.disabled = false;
-		tabInfer.btnStopInfer.disabled = true;
-		tabInfer.staticInferStatus.text = "状态: 已停止";
+		var userId = tabTrain.lvModels.getItemText(selIdx, 1);
+		var modelDir = modelBaseDir + userId + "\";
+		fsys.delete(modelDir);
+		refreshModelList();
+		tabTrain.staticTrainStatus.text = "状态: 已删除 " + userId;
+
+		//刷新主界面状态（根据 running 状态报告不同状态）
+	var models = scanModels();
+	if(#models > 0){
+		if(running){
+			plugin.reportStatus(pluginId, "运行中（已加载" + #models + "个身份）");
+		}
+		else{
+			plugin.reportStatus(pluginId, "已停止（已训练" + #models + "个身份）");
+		}
+	}
+	else{
+		//模型全删完：更新状态并停止推理线程（避免空跑）
+		if(running){
+			plugin.reportStatus(pluginId, "运行中（无模型，请先训练）");
+		}
+		else{
+			plugin.reportStatus(pluginId, "已停止");
+		}
+		if(inferThreadHandle){
+			stopInferThread();
+		}
+	}
+};
+
+	//===== 识别设置 Tab =====
+	var tabInfer = dlg.tabSettings.add(text="识别设置");
+	tabInfer.add(
+		//Python 环境状态显示（顶部）
+		staticPyEnvLabel={cls="static";text="Python环境:";left=20;top=15;right=95;bottom=35;transparent=1};
+		staticPyEnvStatus={cls="static";text="检测中...";left=100;top=15;right=380;bottom=35;transparent=1};
+		staticPyEnvTip={cls="static";text="离线部署: 将嵌入式Python(含numpy/sklearn/skl2onnx/onnxruntime)放到程序目录下的 /py/ 子目录";left=20;top=40;right=380;bottom=58;transparent=1};
+		//推理参数区域
+		staticInterval={cls="static";text="推理间隔(秒):";left=20;top=65;right=120;bottom=85;transparent=1};
+		editInterval={cls="edit";text=tostring(INFER_INTERVAL);left=125;top=63;right=185;bottom=85;edge=1};
+		staticTimeout={cls="static";text="无按键超时(秒):";left=200;top=65;right=300;bottom=85;transparent=1};
+		editTimeout={cls="edit";text=tostring(INFER_TIMEOUT);left=305;top=63;right=365;bottom=85;edge=1};
+		staticThreshold={cls="static";text="置信阈值:";left=20;top=95;right=100;bottom=115;transparent=1};
+		trackbarThreshold={cls="trackbar";left=105;top=95;right=300;bottom=115;min=0;max=100;pos=math.floor(CONFIDENCE_THRESHOLD*100)};
+		staticThresholdValue={cls="static";text=tostring(math.floor(CONFIDENCE_THRESHOLD*100)) + "%";left=310;top=95;right=380;bottom=115;transparent=1};
+		chkShowOverlay={cls="checkbox";text="显示叠加层";left=20;top=125;right=150;bottom=145;checked=SHOW_OVERLAY};
+		btnRescan={cls="button";text="重新扫描模型";left=200;top=125;right=320;bottom=153};
+		staticInferStatus={cls="static";text="当前状态: --";left=20;top=160;right=380;bottom=180;transparent=1};
+		staticInferTip={cls="static";text="说明: 插件启动后自动进入后台推理。推理不干扰输入，左下角显示当前身份。长时间无按键自动回到未识别。";left=20;top=185;right=380;bottom=255;multiline=1;transparent=1};
+	);
+
+	//检测 Python 环境状态并显示
+	tabInfer.staticPyEnvStatus.text = getPyEnvStatus();
+
+	//阈值滑动条
+	tabInfer.trackbarThreshold.onnotify = function(id, code, ptr){
+		if(code == 0xFFFFFFF4/*_TB_ENDTRACK*/ || code == 8/*_TB_THUMBPOSITION*/){
+			var val = tabInfer.trackbarThreshold.pos;
+			tabInfer.staticThresholdValue.text = tostring(val) + "%";
+		}
 	};
+
+	//重新扫描模型
+	tabInfer.btnRescan.oncommand = function(id, event){
+		var models = scanModels();
+		tabInfer.staticInferStatus.text = "已加载 " + #models + " 个身份模型";
+		refreshModelList();
+	};
+
+	//状态定时器
+	var statusTimerId = tabInfer.setInterval(function(){
+		var matched = inferState.matchedUserId;
+		var sim = inferState.bestSimilarity;
+		if(inferState.isMatch && matched){
+			tabInfer.staticInferStatus.text = "当前身份: " + matched + " (相似度 " + tostring(math.floor(sim * 100)) + "%)";
+		}
+		else{
+			tabInfer.staticInferStatus.text = "当前身份: 未识别";
+		}
+	}, 1000);
 
 	dlg.btnReset.oncommand = function(id, event){
-		dlg.chkAutoStart.checked = true;
+		dlg.chkAutoStart.checked = false;
+		tabInfer.editInterval.text = "10";
+		tabInfer.editTimeout.text = "30";
+		tabInfer.trackbarThreshold.pos = 60;
+		tabInfer.staticThresholdValue.text = "60%";
+		tabInfer.chkShowOverlay.checked = true;
+		tabTrain.chkFilterKeys.checked = true;
 	};
 
 	dlg.onClose = function(){
-		plugin.setAutoStart(pluginId, dlg.chkAutoStart.checked);
+		//停止设置界面定时器
+		if(trainTimerId){
+			tabTrain.clearInterval(trainTimerId);
+			trainTimerId = null;
+		}
+		if(statusTimerId){
+			tabInfer.clearInterval(statusTimerId);
+			statusTimerId = null;
+		}
+		//停止训练采集
+		isCollecting = false;
+
+		//保存配置
+		var config = plugin.getConfig(pluginId);
+		config.autoStart = dlg.chkAutoStart.checked;
+		config.sampleTarget = targets[tabTrain.cmbTarget.selIndex] || 500;
+		config.inferInterval = tonumber(tabInfer.editInterval.text) || 10;
+		config.inferTimeout = tonumber(tabInfer.editTimeout.text) || 30;
+		config.confidenceThreshold = tabInfer.trackbarThreshold.pos / 100;
+		config.showOverlay = tabInfer.chkShowOverlay.checked;
+		config.filterKeys = tabTrain.chkFilterKeys.checked;
+		plugin.saveConfig(pluginId, config);
 	};
 
 	dlg.doModal();

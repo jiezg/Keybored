@@ -1,9 +1,15 @@
 {
     "autoStart":false,
+    "confidenceThreshold":0.8,
     "description":"基于击键动力学的用户身份识别插件",
     "entry":"main.aardio",
+    "filterKeys":true,
     "hasSettings":true,
     "id":"keystrokeprint",
+    "inferInterval":10,
+    "inferTimeout":30,
     "name":"键纹分析",
-    "version":"1.0.0"
+    "sampleTarget":500,
+    "showOverlay":true,
+    "version":"1.2.0"
 }

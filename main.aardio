@@ -10,8 +10,12 @@ import plugin;
 
 //预声明插件可能用到的库（注释import告知发布程序打包这些库，但不实际执行import）
 //import win.ui.layered;
+//import gdip;
 //import gdip.path;
 //import gdip.solidBrush;
+//import gdip.family;
+//import gdip.font;
+//import gdip.stringFormat;
 //import gdip.pen;
 //import gdip.bitmap;
 //import gdip.graphics;
@@ -21,6 +25,8 @@ import plugin;
 //import web.json;
 //import gdi;
 //import process;
+//import process.popen;
+//import process.python;
 //import key;
 /*DSG{{*/
 mainForm = win.form(text="Keybored - 盘键盘";right=400;bottom=550;max=false)
@@ -379,6 +385,18 @@ mainForm.onClose = function(hwnd,message,wParam,lParam){
 	mainForm.tray.pop("Keybored在这里",,,1000);
 	return false;//阻击默认关闭消息传递
 }
+mainForm.onDestroy = function(){
+	//主窗口正在销毁时，主动清理所有插件（特别是 keystrokeprint 的 overlay 窗口）
+	//原因：aardio 的 WM_DESTROY 处理器发现 _forms 中还有独立顶层窗口（overlay）时，
+	//会直接 return 不调 win.quitMessage()，导致消息循环不退出、plugin.disposeAll() 永远执行不到。
+	//在这里先销毁 overlay，让 aardio 正常退出消息循环。
+	try{
+		plugin.disposeAll();
+	}
+	catch(e){
+		..io.print("onDestroy 清理插件异常: " + tostring(e));
+	}
+}
 mainForm.onTrayMessage = {
 	[0x205/*_WM_RBUTTONUP*/  ] = function(wParam){ 
 	    //弹出托盘菜单以前,一定要前置主窗口中,避免不点击菜单不会消失，父窗口隐藏也要这样做
@@ -457,7 +475,8 @@ frmTabPlugin.listviewPlugins.onnotify = function(id,code,ptr){
 		var pluginInfo = list[idx];
 
 		var popmenu = win.ui.popmenu(mainForm);
-		if(pluginInfo.status == "运行中"){
+		//用 "!= 已停止" 判断而非 "== 运行中"，兼容 keystrokeprint 的 "运行中（已加载N个身份）" 等带后缀状态
+		if(pluginInfo.status != "已停止"){
 			popmenu.add("停止",function(id){
 				plugin.stop(pluginInfo.id);
 			});
@@ -480,9 +499,14 @@ frmTabPlugin.listviewPlugins.onnotify = function(id,code,ptr){
 plugin.loadAll(mainForm);//加载所有插件
 mainForm.show();
 win.loopMessage();
-hook.setHealthCheckTimer(false);//停止健康检测定时器
-hook.close();
-plugin.disposeAll();//清理所有插件
+try{
+	hook.setHealthCheckTimer(false);//停止健康检测定时器
+	hook.close();
+}
+catch(e){
+	..io.print("hook 关闭异常: " + tostring(e));
+}
+plugin.disposeAll();//清理所有插件（幂等，onDestroy 中已清理过则安全跳过）
 
 /**TODO:
 √长按检测，避开抖动（长按重复KEYDOWN标记为"长按*"，不屏蔽）;
